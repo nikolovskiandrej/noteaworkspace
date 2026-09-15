@@ -5,6 +5,7 @@ import type { WorkspaceRole } from '@notea/protocol';
 import { addMemberAction, removeMemberAction } from '@/lib/actions';
 import { Editor } from './editor';
 import { FileTree } from './file-tree';
+import { TasksPanel, type TasksPanelProps } from './tasks-panel';
 import { TerminalPanel } from './terminal-panel';
 import { useWorkspaceSocket, WorkspaceSocketProvider } from './workspace-socket';
 
@@ -17,6 +18,7 @@ export interface WorkspaceViewProps {
   events: Array<{ id: number; type: string; actorKind: string; createdAt: string; payload: Record<string, unknown> }>;
   currentUserId: string;
   returnTo: string;
+  tasks: TasksPanelProps;
 }
 
 /** Deterministic (UTC, fixed locale) so server and client render identical markup. */
@@ -27,9 +29,14 @@ function formatTimestamp(iso: string): string {
 export function WorkspaceView(props: WorkspaceViewProps) {
   if (!props.running) {
     return (
-      <main className="flex flex-1 items-center justify-center p-6 text-sm text-[#9aa1ab]">
-        This workspace is not running. {props.role !== 'viewer' ? 'Start it from the top bar.' : 'Ask an editor or the owner to start it.'}
-      </main>
+      <div className="flex min-h-0 flex-1">
+        <main className="flex flex-1 items-center justify-center p-6 text-sm text-[#9aa1ab]">
+          This workspace is not running. {props.role !== 'viewer' ? 'Start it from the top bar.' : 'Ask an editor or the owner to start it.'}
+        </main>
+        <aside className="w-80 shrink-0 border-l border-[#232830] bg-[#111418]">
+          <TasksPanel {...props.tasks} />
+        </aside>
+      </div>
     );
   }
   return (
@@ -39,9 +46,10 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   );
 }
 
-function WorkspaceLayout({ workspaceId, role, members, events, currentUserId, returnTo }: WorkspaceViewProps) {
+function WorkspaceLayout({ workspaceId, role, members, events, currentUserId, returnTo, tasks }: WorkspaceViewProps) {
   const { state, presence, lastClose } = useWorkspaceSocket();
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [tab, setTab] = useState<'tasks' | 'people' | 'activity'>('tasks');
   const canWrite = role !== 'viewer';
 
   return (
@@ -62,79 +70,95 @@ function WorkspaceLayout({ workspaceId, role, members, events, currentUserId, re
           <TerminalPanel canInput={canWrite} />
         </div>
       </section>
-      <aside className="flex w-64 shrink-0 flex-col border-l border-[#232830] bg-[#111418] text-xs">
-        <div className="border-b border-[#232830] p-3">
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#9aa1ab]">Here now</h3>
-          <ul className="space-y-1">
-            {presence.length === 0 ? <li className="text-[#6f7782]">Nobody connected</li> : null}
-            {presence.map((p) => (
-              <li key={p.id} className="flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${p.kind === 'agent' ? 'bg-violet-400' : 'bg-emerald-400'}`} />
-                <span className="text-[#e6e9ee]">{p.name}</span>
-                <span className="text-[#6f7782]">{p.role}</span>
-                {p.attachedSessionIds.length > 0 ? <span className="text-[#6f7782]">· {p.attachedSessionIds.length} term</span> : null}
-              </li>
-            ))}
-          </ul>
+      <aside className="flex w-80 shrink-0 flex-col border-l border-[#232830] bg-[#111418] text-xs">
+        <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[#232830] px-2">
+          {(['tasks', 'people', 'activity'] as const).map((name) => (
+            <button
+              key={name}
+              onClick={() => setTab(name)}
+              className={`rounded px-2 py-1 capitalize ${tab === name ? 'bg-[#232830] text-[#e6e9ee]' : 'text-[#9aa1ab] hover:bg-[#1c2027]'}`}
+            >
+              {name}
+              {name === 'people' ? <span className="ml-1 text-[#6f7782]">{presence.length}</span> : null}
+            </button>
+          ))}
         </div>
-        <div className="border-b border-[#232830] p-3">
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#9aa1ab]">Members</h3>
-          <ul className="space-y-1">
-            {members.map((m) => (
-              <li key={m.userId} className="flex items-center gap-2">
-                <span className="truncate text-[#e6e9ee]" title={m.email}>
-                  {m.name}
-                </span>
-                <span className="text-[#6f7782]">{m.role}</span>
-                {role === 'owner' && m.role !== 'owner' ? (
-                  <form action={removeMemberAction} className="ml-auto">
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {tab === 'tasks' ? <TasksPanel {...tasks} /> : null}
+          {tab === 'people' ? (
+            <div className="space-y-4 p-3">
+              <div>
+                <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#9aa1ab]">Here now</h3>
+                <ul className="space-y-1">
+                  {presence.length === 0 ? <li className="text-[#6f7782]">Nobody connected</li> : null}
+                  {presence.map((p) => (
+                    <li key={p.id} className="flex items-center gap-2">
+                      <span className={`h-2 w-2 rounded-full ${p.kind === 'agent' ? 'bg-violet-400' : 'bg-emerald-400'}`} />
+                      <span className="text-[#e6e9ee]">{p.name}</span>
+                      <span className="text-[#6f7782]">{p.role}</span>
+                      {p.attachedSessionIds.length > 0 ? <span className="text-[#6f7782]">· {p.attachedSessionIds.length} term</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#9aa1ab]">Members</h3>
+                <ul className="space-y-1">
+                  {members.map((m) => (
+                    <li key={m.userId} className="flex items-center gap-2">
+                      <span className="truncate text-[#e6e9ee]" title={m.email}>
+                        {m.name}
+                      </span>
+                      <span className="text-[#6f7782]">{m.role}</span>
+                      {role === 'owner' && m.role !== 'owner' ? (
+                        <form action={removeMemberAction} className="ml-auto">
+                          <input type="hidden" name="workspaceId" value={workspaceId} />
+                          <input type="hidden" name="userId" value={m.userId} />
+                          <input type="hidden" name="returnTo" value={returnTo} />
+                          <button className="text-[#6f7782] hover:text-rose-300" title="Remove member">
+                            ×
+                          </button>
+                        </form>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+                {role === 'owner' ? (
+                  <form action={addMemberAction} className="mt-2 flex flex-col gap-1">
                     <input type="hidden" name="workspaceId" value={workspaceId} />
-                    <input type="hidden" name="userId" value={m.userId} />
                     <input type="hidden" name="returnTo" value={returnTo} />
-                    <button className="text-[#6f7782] hover:text-rose-300" title="Remove member">
-                      ×
-                    </button>
+                    <input
+                      name="email"
+                      type="email"
+                      required
+                      placeholder="collaborator@example.com"
+                      className="rounded border border-[#2b313b] bg-[#0e1014] px-2 py-1 outline-none focus:border-emerald-500/60"
+                    />
+                    <div className="flex gap-1">
+                      <select name="role" className="flex-1 rounded border border-[#2b313b] bg-[#0e1014] px-2 py-1">
+                        <option value="editor">editor</option>
+                        <option value="viewer">viewer</option>
+                      </select>
+                      <button className="rounded border border-emerald-500/40 px-2 py-1 text-emerald-300 hover:bg-emerald-500/10">Add</button>
+                    </div>
                   </form>
                 ) : null}
-              </li>
-            ))}
-          </ul>
-          {role === 'owner' ? (
-            <form action={addMemberAction} className="mt-2 flex flex-col gap-1">
-              <input type="hidden" name="workspaceId" value={workspaceId} />
-              <input type="hidden" name="returnTo" value={returnTo} />
-              <input
-                name="email"
-                type="email"
-                required
-                placeholder="collaborator@example.com"
-                className="rounded border border-[#2b313b] bg-[#0e1014] px-2 py-1 outline-none focus:border-emerald-500/60"
-              />
-              <div className="flex gap-1">
-                <select name="role" className="flex-1 rounded border border-[#2b313b] bg-[#0e1014] px-2 py-1">
-                  <option value="editor">editor</option>
-                  <option value="viewer">viewer</option>
-                </select>
-                <button className="rounded border border-emerald-500/40 px-2 py-1 text-emerald-300 hover:bg-emerald-500/10">Add</button>
               </div>
-            </form>
+              <p className="text-[10px] text-[#6f7782]">you: {members.find((m) => m.userId === currentUserId)?.name ?? 'unknown'} ({role})</p>
+            </div>
           ) : null}
-        </div>
-        <div className="min-h-0 flex-1 overflow-auto p-3">
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#9aa1ab]">Activity</h3>
-          <ul className="space-y-1.5">
-            {events.map((event) => (
-              <li key={event.id} className="text-[#aab1bb]">
-                <span className="text-[#e6e9ee]">{event.type}</span>
-                <span className="block text-[10px] text-[#6f7782]">
-                  {event.actorKind} · {formatTimestamp(event.createdAt)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="border-t border-[#232830] p-2 text-[10px] text-[#6f7782]">
-          you: {members.find((m) => m.userId === currentUserId)?.name ?? 'unknown'} ({role})
+          {tab === 'activity' ? (
+            <ul className="h-full space-y-1.5 overflow-auto p-3">
+              {events.map((event) => (
+                <li key={event.id} className="text-[#aab1bb]">
+                  <span className="text-[#e6e9ee]">{event.type}</span>
+                  <span className="block text-[10px] text-[#6f7782]">
+                    {event.actorKind} · {formatTimestamp(event.createdAt)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </aside>
     </div>

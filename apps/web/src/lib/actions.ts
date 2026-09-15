@@ -4,7 +4,9 @@ import { AuthError } from 'next-auth';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { auth, signIn, signOut } from '@/auth';
+import { addCredential, deleteCredential, requireCredentialsKey } from './credentials';
 import { getDb } from './db';
+import { env } from './env';
 import { getOrchestrator } from './orchestrator';
 import {
   addMember,
@@ -14,6 +16,7 @@ import {
   startWorkspace,
   stopWorkspace,
 } from './workspaces';
+import { approveTask, cancelTask, createTask, deleteTask, requeueTask, updatePolicy } from './tasks';
 
 async function requireUserId(): Promise<string> {
   const session = await auth();
@@ -131,4 +134,104 @@ export async function removeMemberAction(formData: FormData): Promise<void> {
   }
   revalidatePath(returnTo);
   redirect(returnTo);
+}
+
+// ---------------------------------------------------------------------------
+// Agent tasks, coordination policy, provider credentials
+// ---------------------------------------------------------------------------
+
+
+export async function createTaskAction(formData: FormData): Promise<void> {
+  const userId = await requireUserId();
+  const workspaceId = field(formData, 'workspaceId');
+  const returnTo = field(formData, 'returnTo') || '/';
+  try {
+    await createTask(getDb(), userId, workspaceId, {
+      title: field(formData, 'title'),
+      description: field(formData, 'description'),
+      runtime: field(formData, 'runtime'),
+      model: field(formData, 'model') || undefined,
+      credentialId: field(formData, 'credentialId') || undefined,
+      scope: field(formData, 'scope') || undefined,
+      command: field(formData, 'command') || undefined,
+      agentName: field(formData, 'agentName') || undefined,
+      maxMinutes: Number(field(formData, 'maxMinutes') || 30),
+    });
+  } catch (err) {
+    withError(returnTo, err);
+  }
+  revalidatePath(returnTo);
+  redirect(returnTo);
+}
+
+async function taskTransitionAction(formData: FormData, fn: (db: ReturnType<typeof getDb>, userId: string, taskId: string) => Promise<void>): Promise<void> {
+  const userId = await requireUserId();
+  const returnTo = field(formData, 'returnTo') || '/';
+  try {
+    await fn(getDb(), userId, field(formData, 'taskId'));
+  } catch (err) {
+    withError(returnTo, err);
+  }
+  revalidatePath(returnTo);
+  redirect(returnTo);
+}
+
+export async function approveTaskAction(formData: FormData): Promise<void> {
+  return taskTransitionAction(formData, approveTask);
+}
+
+export async function cancelTaskAction(formData: FormData): Promise<void> {
+  return taskTransitionAction(formData, cancelTask);
+}
+
+export async function requeueTaskAction(formData: FormData): Promise<void> {
+  return taskTransitionAction(formData, requeueTask);
+}
+
+export async function deleteTaskAction(formData: FormData): Promise<void> {
+  return taskTransitionAction(formData, deleteTask);
+}
+
+export async function updatePolicyAction(formData: FormData): Promise<void> {
+  const userId = await requireUserId();
+  const workspaceId = field(formData, 'workspaceId');
+  const returnTo = field(formData, 'returnTo') || '/';
+  try {
+    await updatePolicy(getDb(), userId, workspaceId, {
+      overlap: field(formData, 'overlap') === 'warn' ? 'warn' : 'block',
+      integration: field(formData, 'integration') === 'auto' ? 'auto' : 'human',
+      checkCommand: field(formData, 'checkCommand').trim() || null,
+      baseBranch: field(formData, 'baseBranch').trim() || 'main',
+    });
+  } catch (err) {
+    withError(returnTo, err);
+  }
+  revalidatePath(returnTo);
+  redirect(returnTo);
+}
+
+export async function addCredentialAction(formData: FormData): Promise<void> {
+  const userId = await requireUserId();
+  try {
+    await addCredential(getDb(), userId, requireCredentialsKey(env().CREDENTIALS_KEY), {
+      provider: field(formData, 'provider'),
+      label: field(formData, 'label'),
+      secret: field(formData, 'secret'),
+    });
+  } catch (err) {
+    withError('/settings/credentials', err);
+  }
+  revalidatePath('/settings/credentials');
+  redirect('/settings/credentials');
+}
+
+export async function deleteCredentialAction(formData: FormData): Promise<void> {
+  const userId = await requireUserId();
+  try {
+    await deleteCredential(getDb(), userId, field(formData, 'credentialId'));
+  } catch (err) {
+    withError('/settings/credentials', err);
+  }
+  revalidatePath('/settings/credentials');
+  redirect('/settings/credentials');
 }

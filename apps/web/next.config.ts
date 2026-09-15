@@ -17,7 +17,7 @@ const nextConfig: NextConfig = {
   // blocks its dev/HMR resources cross-origin and the client never hydrates.
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
   // Workspace packages export TypeScript source; let Next compile them.
-  transpilePackages: ['@notea/protocol', '@notea/db', '@notea/workspace-client'],
+  transpilePackages: ['@notea/protocol', '@notea/db', '@notea/workspace-client', '@notea/agents'],
   // Native/Node-only server dependencies stay external to the server bundle.
   serverExternalPackages: ['postgres'],
 };
