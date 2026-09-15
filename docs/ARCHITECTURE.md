@@ -87,7 +87,7 @@ One WebSocket per tab or per worker connection; orchestrator is a pure pipe afte
 Next.js 16 App Router, server components + server actions, route handlers only for the connect token and Auth.js. Auth.js v5 credentials provider with scrypt hashes, JWT sessions, `proxy.ts` as a convenience gate (every action re-checks membership). Drizzle over postgres.js. Dev: root `.env` is loaded by `next.config.ts`; `allowedDevOrigins` includes 127.0.0.1.
 
 ## 8. Deployment topology
-Development on Windows + Docker Desktop (verified). Production for personal use (planned, M2): one Linux VPS with compose (caddy, web, orchestrator with docker socket, worker, postgres on a control-only network). Guard the host's disk: builds, volumes and the Docker VM disk share it; a full disk turned Docker read-only during development.
+Development on Windows + Docker Desktop (verified). Production for personal use (planned, M2): one Linux VPS with compose (caddy, web, orchestrator with docker socket, worker, postgres on a control-only network). Guard the host's disk: builds, volumes and the Docker VM disk share it; a full disk turned Docker read-only during development. On this machine that risk was removed by moving Docker's data disk to D: — see §12.
 
 ## 9. The hard problems: status
 | Problem | Status |
@@ -110,5 +110,23 @@ Node 24 · TS 5.9 · zod 4 · ws 8 · node-pty 1.1 · Fastify 5 · dockerode 5 �
 ## 11. Reversible vs expensive
 Expensive: protocol shapes, identity model, HOME layout, control/runtime split, worktree-per-task + serialized integration, task status names. Reversible: worker placement, polling vs LISTEN/NOTIFY, JSON frames, UI framework details, base image contents.
 
-## 12. Prior art
+## 12. Storage layout (development host)
+The development machine's system drive (C:, 145 GB) is small and was repeatedly filled by Docker; the data drive (D:, 328 GB) holds everything this project can put there. Nothing of consequence belonging to Notea Workspace now lives on C:.
+
+| What | Location | Notes |
+|---|---|---|
+| Source, `node_modules`, `.next`, `dist` | `D:\ClaudeProjects\notea-workspace` | the repository itself |
+| Docker data disk (images, containers, volumes, build cache) | `D:\DockerDesktop\wsl\disk\docker_data.vhdx` | moved by Docker Desktop itself; see below |
+| Docker Desktop VM root | `D:\DockerDesktop\wsl\main\ext4.vhdx` | WSL2 distro `docker-desktop` |
+| Notea Postgres data | Docker volume `notea-dev-postgres-data` | inside the data disk, therefore on D: |
+| Workspace HOME (project, worktrees, run artefacts, in-container CLI state) | Docker volume `notea-ws-<id>-home` | inside the data disk, therefore on D: |
+| npm cache | `D:\NoteaWorkspaceData\npm-cache` | user-level `cache=` in `C:\Users\<user>\.npmrc` |
+| Test scratch (`os.tmpdir()` in suites) | `<repo>\.tmp` | set by `vitest.shared.mjs`, git-ignored |
+| Host-side backups (db dump, volume tar) | `D:\NoteaWorkspaceData\backups` | taken before the migration; not automated |
+
+**Docker storage is shared with another project on this machine.** Moving it moved that project's containers and volumes too, which is safe (they were preserved and restarted) but means the location is not Notea-specific. The move was performed through Docker Desktop's own mechanism, not by copying files: the setting is `wslDataFolder` in the backend settings API, persisted as `CustomWslDistroDir` in `%APPDATA%\Docker\settings-store.json`. Docker Desktop stops the engine, unregisters the WSL distro, moves `docker_data.vhdx`, and re-registers the distro at the new path — it rewrites the WSL registration itself, so the location must not be changed by hand.
+
+To move it again, or to move it back, use the Docker Desktop GUI (**Settings → Resources → Advanced → Disk image location**). Editing `settings-store.json` directly does **not** work: Docker ignores the key at startup and creates a fresh empty disk at the default location, which looks exactly like total data loss. The original disk is still there; restore by putting the old folder back and clearing the setting.
+
+## 13. Prior art
 See session-1 notes in `PROJECT_SPEC.md` §10 (Coder, Ona, Codespaces, Coterm, Clopen, Conductor, Claude Squad, cmux, GitHub Next Ace).

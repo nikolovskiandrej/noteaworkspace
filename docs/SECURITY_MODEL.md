@@ -28,6 +28,16 @@ Actors: owner (trusted), invited collaborators (semi-trusted, shell access insid
 
 **Provider credentials.** AES-256-GCM under `CREDENTIALS_KEY` (64 hex chars), per-user ownership enforced on every access, injected only into the run's session environment, masked in the UI. Alternative: CLI logins stored on the workspace volume (personal-use shortcut).
 
+> **Known limitation — a workspace collaborator can read the owner's API key during a run (verified 2026-09-15).** The key is injected into the agent's terminal session environment, but the agent process runs as the same uid (1000, `dev`) as every human shell in that container, so anyone with terminal access can read it while the run is in flight:
+>
+> ```
+> grep -a ANTHROPIC_API_KEY /proc/<agent pid>/environ
+> ```
+>
+> This was tested inside the running workspace container and the environment of another process *is* readable. Blocking `term.input` on agent-owned sessions would not close it, and neither would masking the UI — `/proc` is the path. Treat "injected only into the run's session" as protection against *casual* exposure (it is not in a normal shell's environment, not in the UI, not in the database in plaintext), not as isolation from an editor who goes looking.
+>
+> Consequence for the current threat model: **give a workspace only to collaborators you would trust with the provider key you attach to its tasks.** Real fixes, in increasing order of cost: run agent CLIs as a second uid in the image with `hidepid` on `/proc`; run each agent task in its own short-lived container that mounts only the worktree; or move to an API-loop runtime where the key never leaves the worker process. The third is the direction `AGENT_SYSTEM.md` §3 already anticipates.
+
 **Container ↔ container / control network.** Workspaces share `notea-workspaces`; Postgres must stay on a separate network in production (M2 compose).
 
 **Workspace ↔ internet.** Full egress; no filtering.

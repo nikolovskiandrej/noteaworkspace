@@ -1,6 +1,6 @@
 # Notea Workspace — Agent System
 
-Last updated: 2026-09-15 (session 2). Status: **implemented** (packages/agents, apps/worker, web tasks UI) and **verified in Docker with the generic runtime**; the Claude Code runtime is implemented and unit-tested but has not yet run against the real CLI.
+Last updated: 2026-09-15 (session 4). Status: **implemented** (packages/agents, apps/worker, web tasks UI) and **verified in Docker**. All three CLI runtimes have been executed against the real binaries in a workspace container; each starts, is parsed correctly and stops at its credential check. Cancellation and the max-minutes timeout are verified end to end against real container processes. What has never run is an *authenticated* agent task — no provider credential exists on this machine.
 
 ## 1. Principles (unchanged)
 Agents are participants; isolation by worktree, integration by queue; scopes declared, leases advisory, integration authoritative; the repository is the memory; provider-agnostic; humans can always see, stop and approve.
@@ -25,8 +25,17 @@ Project         /home/dev/project (main tree) + /home/dev/.notea/worktrees/<task
 ## 4. Runtime interface (actual)
 `packages/agents/src/types.ts`: `AgentRuntime { id, label, provider, supports(model), start(ctx, session) → AgentRunHandle { sessionId, events: AsyncIterable<AgentRunEvent>, cancel() } }`. `WorkspaceSession` is the small surface runtimes need (create/kill terminal, output/exit listeners, write a host file); `ClientWorkspaceSession` implements it over `WorkspaceClient`. `startTerminalRun` turns a command into an event stream with a max-minutes timeout.
 
-## 5. Claude Code runtime
-Command: `cd <worktree> && claude -p "$(cat brief.md)" --output-format stream-json --verbose [--model X] [--max-turns N] --dangerously-skip-permissions`. Parser (`parseClaudeStreamLine`): `assistant`/`user` records → `message` and `tool_call` (+ `file_changed` for Edit/Write/MultiEdit/NotebookEdit), `result` → `usage` + `finished`, everything else → `log`. **Verify against CLI 2.1.272 on the first real run**; add real output samples to the tests.
+## 5. CLI runtimes (command lines verified against the installed binaries)
+
+| Runtime | Command | Parsing |
+|---|---|---|
+| `claude-code-cli` | `claude -p "$(cat brief.md)" --output-format stream-json --verbose [--model X] [--max-budget-usd N] --dangerously-skip-permissions < /dev/null` | `parseClaudeStreamLine`: `assistant`/`user` → `message` + `tool_call` (+ `file_changed` for Edit/Write/MultiEdit/NotebookEdit), `result` → `usage` + `finished`, else `log` |
+| `codex-cli` | `codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox [-m X] "$(cat brief.md)" < /dev/null` | `parseCodexLine`: `item.completed/started` → message / tool_call / file_changed, `turn.completed` → `usage`, `error`/`turn.failed` → error logs |
+| `gemini-cli` | `gemini --approval-mode yolo [-m X] -p "$(cat brief.md)" < /dev/null` | text lines → log events; seeds `~/.gemini/settings.json` with folder trust disabled, because Gemini silently downgrades approval mode in untrusted folders |
+
+`--max-turns` does **not** exist in claude-code 2.1.272; the spend cap is `--max-budget-usd`, fed from the task's `maxBudgetUsd`. The `max_turns` column is retained but unused.
+
+**Two `finished` events are normal.** The `result` record produces one, and process exit produces another; the worker keeps the last, so the exit code is authoritative. A CLI can report a *success-shaped* result that is actually a failure — claude-code emits `{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}` and then exits 1 — so the parser honours `is_error`, a non-zero exit overrides a success, and the exit-time event carries the earlier record's summary forward (`state.summary`) so the failure keeps its explanation instead of surfacing as a bare "failed". Fixtures from that real output are in `packages/agents/test/runtimes.test.ts`.
 
 ## 6. Isolation (implemented)
 `GitWorktrees`: `ensureRepository` (git init + initial commit if needed), `createTaskWorktree` (idempotent; reuses an existing worktree/branch), `commitAll` as the agent identity, `commitsAhead`, `diffStat`, `rebaseOnto` (aborts on conflict), `fastForward` (refuses if the main tree is dirty or on another branch), `removeTaskWorktree`. Worktrees have no `node_modules`; agents install if they need to (open question).
@@ -49,6 +58,10 @@ Stored encrypted per user; selected per task; the worker decrypts with `CREDENTI
 
 ## 11. Failure handling (implemented)
 Runtime exceptions → run/task `failed` with the message; process exit ≠ 0 → `failed`; max-minutes timeout → `timeout`; cancellation → `cancelled`; worker crash → stale-run recovery marks runs failed after 2 minutes without a heartbeat; container restart mid-run → the run fails, the worktree/branch persist, re-run continues on the same branch.
+
+The event stream always terminates. `startTerminalRun` kills the session at the max-minutes deadline and, if the session's exit notification does not arrive within `EXIT_GRACE_MS` (10 s), ends the stream itself — the same fallback covers cancellation. Without it a lost exit notification would block the worker's `for await` forever while its heartbeat kept refreshing, so the task would sit in `running` permanently and stale-run recovery, which looks for a *stopped* heartbeat, would never reclaim it.
+
+Verified end to end against real container processes (session 4): a cancelled task killed its `sleep 300` and recorded `cancelled`; a task with `max_minutes = 1` ended exactly 60 s after start with outcome `timeout` and its process gone.
 
 ## 12. Open questions
 1. `node_modules` in worktrees. 2. Runner placement (beside orchestrator vs inside container). 3. Deleting task branches after integration. 4. Live streaming of run events to the UI (currently 5 s refresh). 5. Structured parsing for Codex/Gemini.

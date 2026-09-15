@@ -42,12 +42,31 @@ Sign in, create a workspace, open a terminal, edit files. To run an agent task: 
 
 After rebuilding the image, stop and start a workspace: the orchestrator recreates its container on the new image while keeping the volume.
 
+## Storage
+
+Everything this project stores — source, `node_modules`, Docker images, containers, volumes, build cache, the dev database and the npm cache — is heavy, and on a small system drive it will fill it. On the development machine it all lives on the data drive (D:); `docs/ARCHITECTURE.md` §12 documents the exact locations and how Docker's data disk was moved there.
+
+Two of those are machine-level settings rather than repository settings, so a fresh clone elsewhere keeps that machine's defaults:
+
+```bash
+npm config get cache        # this machine: D:\NoteaWorkspaceData\npm-cache
+# Docker's data disk: Docker Desktop → Settings → Resources → Advanced → Disk image location
+```
+
+Test scratch directories do travel with the repository: `vitest.shared.mjs` points `TMPDIR`/`TEMP`/`TMP` at `<repo>/.tmp` so suites never write to the system temp directory.
+
 ## Tests
 
 ```bash
 npm run typecheck
-DATABASE_URL=postgres://notea:notea@127.0.0.1:55432/notea npm test   # db-backed suites skip without DATABASE_URL
+npm test                                                               # db-backed suites skip without DATABASE_URL
 npm run test:e2e -w @notea/orchestrator                                # real container end to end
+
+# The db and worker suites need a database. Use a throw-away one: the worker
+# suite clears tasks in beforeEach, so never point it at the dev database.
+docker exec notea-dev-postgres psql -U notea -d postgres -c 'CREATE DATABASE notea_test'
+DATABASE_URL=postgres://notea:notea@127.0.0.1:55432/notea_test npm test -w @notea/db -w @notea/worker
+docker exec notea-dev-postgres psql -U notea -d postgres -c 'DROP DATABASE notea_test'
 ```
 
 ## Documentation

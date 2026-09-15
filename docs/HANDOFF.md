@@ -1,6 +1,6 @@
 # Notea Workspace — Handoff
 
-Written 2026-09-15 by Fable 5.1 (end of session 2) for the next implementing agent (Opus 5). Self-contained; the conversation is not needed. Read `CURRENT_STATE.md` next, then `ARCHITECTURE.md`, `AGENT_SYSTEM.md`, `DECISIONS.md`.
+Written 2026-09-15, updated at the end of session 4 (migration verification + agent-pipeline hardening). Self-contained; the conversation is not needed. Read `CURRENT_STATE.md` next, then `ARCHITECTURE.md`, `AGENT_SYSTEM.md`, `DECISIONS.md`.
 
 ## 1. Product summary
 
@@ -9,9 +9,9 @@ Self-hosted, browser-based shared development workspace: one persistent Linux co
 ## 2. Current goal
 
 Make the agent flow real with actual coding agents and harden collaboration:
-1. Run the first real Claude Code task (needs an Anthropic key stored under Settings → Credentials, or `claude login` in a workspace terminal), verify the headless flags and the stream-json parsing against CLI 2.1.272, fix what differs.
-2. Verify/parse Codex CLI and Gemini CLI output (currently generic runtimes with unverified flags).
-3. M2 leftovers: sign-in rate limiting, file watcher (`fs.changed` for terminal-side edits), invites by link.
+1. Run the first *authenticated* Claude Code task (needs an Anthropic key stored under Settings → Credentials, or `claude login` in a workspace terminal) and confirm the stream-json parsing against CLI 2.1.272. The flags and the command line are already verified against the real CLI; what has never been exercised is a run that gets past authentication.
+2. Same for the Codex and Gemini runtimes, which now have their own parsers rather than the generic one.
+3. M2 leftovers: file watcher (`fs.changed` for terminal-side edits), invites by link. Sign-in rate limiting is done (commit `d50481f`).
 4. M2 deployment: single-VPS compose with Caddy (see `IMPLEMENTATION_PLAN.md`).
 
 ## 3. Current architecture
@@ -33,7 +33,7 @@ Everything listed under "Implemented behaviour" in `CURRENT_STATE.md`: protocol 
 ## 7. Partially implemented
 
 - Collaboration (M2): membership, roles, shared terminals, presence and `fs.changed` notices exist; missing: rate limiting, watcher for terminal-side edits, invite links, activity feed for connection events.
-- Agent runtimes: Claude Code runtime is complete in code but not executed against the real CLI; Codex/Gemini are generic (no structured events).
+- Agent runtimes: all three have their own parsers and have been executed against the real CLIs, which stop at their credential check; no authenticated run has happened.
 - Cost tracking: usage from Claude Code `result` records is aggregated per run/task; no budgets or per-user totals.
 
 ## 8. Not started
@@ -58,34 +58,50 @@ Unchanged from session 1 (`ARCHITECTURE.md` §4–6) plus: exec processes bound 
 
 ## 17. Important decisions
 
-`DECISIONS.md` D-001…D-028. Do not casually reverse: identify-first bridge (D-007), hardening (D-009), HOME volume (D-010), worktree-per-task + serialized integration (D-013), stateless orchestrator (D-005), runs as watchable terminal sessions (D-024), worker as a separate process (D-026).
+`DECISIONS.md` D-001…D-037. Do not casually reverse: identify-first bridge (D-007), hardening (D-009), HOME volume (D-010), worktree-per-task + serialized integration (D-013), stateless orchestrator (D-005), runs as watchable terminal sessions (D-024), worker as a separate process (D-026).
 
 ## 18. Known bugs
 
-None open. Bugs found and fixed this session: Next 16 `allowedDevOrigins` (pages never hydrated when reached as 127.0.0.1), provider constructed during SSR, proxy matcher export name, stale container image after rebuild.
+None open. Fixed in session 4, each with tests: connect tokens written to the orchestrator log (D-033); the worker exceeding its concurrency limit (D-034); the integration lease released while another task still needed it (D-035); a lost terminal-exit notification hanging a run forever (D-036); an overridden failure losing the CLI's explanation (D-037). Earlier sessions: Next 16 `allowedDevOrigins`, provider constructed during SSR, proxy matcher export name, stale container image after rebuild.
 
 ## 19. Technical debt
 
-`CURRENT_STATE.md` "Known issues and technical debt" (12 items).
+`CURRENT_STATE.md` "Known issues and technical debt" (13 items).
 
 ## 20. Blockers
 
-None technical. A real Claude Code run requires a user-provided API key or CLI login.
+**One, and it needs the owner: no provider credential exists on this machine.** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` and `GOOGLE_API_KEY` are all unset and the `provider_credentials` table is empty, so every agent run stops at its CLI's auth check. Store a key under Settings → Credentials, or log a CLI in from a workspace terminal. Nothing else is blocked.
 
 ## 21. Tested / 22. Not tested
 
-Tested: see §6. Not tested: real Claude Code/Codex/Gemini runs; `network` connect mode on Linux; multiple workers; long-running (hours) sessions; browser on mobile; `next build` after the final UI changes (run it).
+Tested: see §6 and the verification table in `CURRENT_STATE.md`, which now covers the browser UI, real cancellation, real timeouts and real (unauthenticated) runs of all three CLIs.
 
-## 23. Exact current state
+Not tested: an **authenticated** agent run of any provider — the one real gap; `network` connect mode on Linux; more than one worker process; long-running (hours) sessions; browser on mobile; recovery from a workspace connection dropped mid-run (the 10 s exit-grace fallback covers it in unit tests, not against a real severed connection).
 
-All work committed on `main`. Background processes from the session (orchestrator, web dev server, worker) are stopped at handoff. The `demo-project` workspace exists in the dev database; its container runs the exec-capable image and its volume holds the integrated agent commit. **The host's C: drive is full** (see `CURRENT_STATE.md`, "Incident"): Docker is read-only until space is freed, so the first action of the next session is to free disk space, restart Docker Desktop, `docker compose -p notea-dev … up -d`, and rebuild the image (the CLI layer has not been built yet). `next build` passes.
+## 23. Exact current state (session 4)
+
+**The migration was re-verified independently, and the agent pipeline was hardened.** Storage: Docker's data disk is at `D:\DockerDesktop\wsl` (confirmed from Docker's own settings API and the WSL registration), nothing of this project's remains on C:, and the repository contains no C: paths outside documentation. Environment: all four migrations applied and in sync with the journal, Postgres on 55432 with the other project's Postgres untouched on 5432, container hardening intact (non-root `dev`, `CapDrop ALL`, `no-new-privileges`, no bind mounts), all three agent CLIs present in the running container.
+
+Verified for real, not with mocks: the browser UI end to end (sign-in session, file tree, editor save written through to the container, terminal as `dev`, presence, tasks panel); cancellation (a `sleep 300` task cancelled, process killed, run `cancelled`); the max-minutes timeout (a 1-minute task ended at exactly 60 s with outcome `timeout`); and real runs of all three CLIs, each stopping at its own credential check with correctly parsed events.
+
+Five defects were found and fixed, each with tests: connect tokens were being written to the orchestrator log (D-033); the worker could exceed its concurrency limit and claim every queued task in one tick (D-034); the integration lease could be released while a second task still needed it (D-035); a lost terminal-exit notification would hang a run forever, out of reach of stale-run recovery (D-036); and an overridden failure lost the CLI's explanation (D-037). Suite: 24 files, all green — agents 28, workspace-agent 42, orchestrator 21 (+18 Docker e2e), web 13, protocol 6, workspace-client 6, worker 8, db 1.
+
+## 23b. Previous state
+
+**The disk problem is fixed.** Session 3 moved Docker's data disk, the npm cache and test scratch off C: onto D: (`ARCHITECTURE.md` §12); C: went from 1.01 GB free to 22.19 GB free, and a full `npm run build:image` now writes nothing to C:. The whole stack was re-verified on the new storage: typecheck, every test suite (including the db/worker suites against a real Postgres and the orchestrator's real-Docker e2e), a production `next build`, an image rebuild, container recreation with the HOME volume preserved, and a `generic-cli` task driven from `queued` to `done`.
+
+The `demo-project` workspace exists in the dev database (`ebc7f427-…`); its container runs the freshly rebuilt image containing claude-code 2.1.272, codex-cli 0.154.0 and gemini-cli 0.59.0, and its volume holds the integrated agent commits. Background processes started for verification (orchestrator, web dev server, worker) are stopped at handoff.
 
 ## 24. Exact next step
 
-0. Free space on C: (or move Docker's disk image to D:), restart Docker Desktop, confirm `docker info` works.
-1. `docker compose -p notea-dev -f infra/compose/docker-compose.dev.yml up -d`, `npm install`, `npm run migrate -w @notea/db`, `npm run build:image` (now includes the agent CLIs; verify with `docker run --rm --entrypoint bash notea/workspace:dev -lc 'claude --version'`).
-2. Start orchestrator, web, worker (§29). Sign in, open `demo-project`, store an Anthropic key under Credentials, create a Claude Code task with a small scope, watch the `agent:` terminal tab, then review and approve.
-3. Fix whatever the real CLI does differently (flags, JSON shapes) in `packages/agents/src/runtimes/claude-code.ts`; add parser fixtures from real output to `packages/agents/test/runtimes.test.ts`.
+**The only blocker is a credential, and it needs you.** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` and `GOOGLE_API_KEY` are all unset and `provider_credentials` is empty, so every agent run stops at its CLI's auth check. Everything up to that boundary is verified.
+
+1. Start the stack: `docker compose -p notea-dev -f infra/compose/docker-compose.dev.yml up -d`, then orchestrator, web and **exactly one** worker (§29).
+2. Provide a credential — store an Anthropic key under Settings → Credentials, or run `claude login` in a workspace terminal.
+3. Re-queue "Claude: add a CHANGELOG entry" and watch the first *authenticated* run: the agent should edit inside `/home/dev/.notea/worktrees/<taskId>`, the task should reach `needs_review` with a real diff stat, and approving it should rebase and fast-forward `main`. Add the real `assistant`/`tool_use`/`result` records as fixtures next to the unauthenticated ones already in `packages/agents/test/runtimes.test.ts`.
+4. Then pick up, in rough order of value: a worktree reaper on the worker tick (known issue 3), live run events instead of the 5 s refresh (`IMPLEMENTATION_PLAN.md` step 3), and the M2 leftovers.
+
+Before sharing a workspace with anyone, read `SECURITY_MODEL.md` → Provider credentials: a collaborator with terminal access can read the key of a run in flight through `/proc`.
 
 ## 25. Files to inspect first
 
@@ -108,6 +124,8 @@ Personal use on owner-controlled hosts; Docker available; collaborators are invi
 ## 28. Environment and setup
 
 `.env` at the repo root (`.env.example` lists every variable): orchestrator secrets, `DATABASE_URL`, `AUTH_SECRET`, `ORCHESTRATOR_URL`, `CREDENTIALS_KEY` (shared by web and worker), optional worker tuning. Next.js and the worker load the root `.env` automatically. Docker Desktop must be running.
+
+Storage on this machine is deliberately off the C: drive — Docker's data disk is at `D:\DockerDesktop\wsl`, the npm cache at `D:\NoteaWorkspaceData\npm-cache`, test scratch at `<repo>\.tmp`. The first two are machine settings, not repository settings, so they do not follow a clone; `ARCHITECTURE.md` §12 has the layout, the reasoning and the exact procedure for changing Docker's location (use the GUI — editing `settings-store.json` by hand silently creates an empty disk).
 
 ## 29. Commands
 

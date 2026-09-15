@@ -150,3 +150,32 @@ Format: context → options → decision → why → revisit when. Numbers are s
 
 ### D-031 Next.js development must allow the 127.0.0.1 origin
 **Context.** Next 16 blocks its dev resources cross-origin; pages reached as 127.0.0.1 silently never hydrated. `allowedDevOrigins` is set in `next.config.ts`. Operational note, not a design choice.
+
+### D-032 The development host's storage lives on D:, and Docker's data disk moved there
+**Context.** The machine's system drive is 145 GB and was at 1 GB free; the data drive has 328 GB. Docker Desktop's WSL2 data disk (15.5 GB, holding every image, container, volume and build-cache entry) sat on the system drive, and a single image rebuild was enough to fill it — that is what turned Docker's VM read-only mid-session and broke the dev database and the worker.
+**Decision.** Move Docker Desktop's data disk to `D:\DockerDesktop\wsl`, point the npm cache at `D:\NoteaWorkspaceData\npm-cache`, and redirect test scratch to a repository-local `.tmp`. Everything else this project stores was already inside the repository or inside a Docker named volume, so it followed automatically.
+**Why this way.** The move was done through Docker Desktop's own routine (the `wslDataFolder` setting on its backend API, persisted as `CustomWslDistroDir`), which stops the engine, unregisters the WSL distro, moves the disk and re-registers it. Copying the VHDX by hand would have left the WSL registration pointing at the old path, and editing `settings-store.json` directly is silently ignored — Docker starts on a fresh empty disk instead, which is indistinguishable from data loss until you look.
+**Consequence.** Docker's storage is shared with an unrelated project on this machine, so this moved that project's containers and volumes too. They were preserved and restarted; nothing was pruned or deleted. The storage location is therefore a property of the machine, not of this repository: only `.tmp` follows a clone.
+**Revisit.** On a Linux production host this is moot — set `data-root` in `daemon.json` at install time instead.
+
+### D-033 Query strings never reach the orchestrator log
+**Context.** Browsers and the worker open the bridge as `/ws/workspaces/<id>?token=<connect JWT>`. Fastify's default request serializer logs `req.url` verbatim, so every connection wrote a live workspace credential — owner role included — into the orchestrator's log, contradicting SECURITY_MODEL.md §3.
+**Decision.** `buildApp` installs a request serializer that replaces any query string with `?<redacted>`, applied last so a caller's serializers cannot restore full-URL logging. Method, path, host, address and status are still logged, so requests stay traceable.
+**Revisit.** If a route ever needs a query value in the log, log that field explicitly rather than the raw URL.
+
+### D-034 The worker's concurrency limit is counted in-process, not in the database
+**Context.** The tick claimed tasks while `countOwnRunningRuns` (a database query) was below the limit, but `runTask` writes its `agent_runs` row several round trips after the claim. The count therefore read zero while previous claims were still starting up, and a single tick could claim every queued task at once, ignoring `WORKER_MAX_CONCURRENT_RUNS`.
+**Decision.** `RunSlots` counts the run promises this process is holding; `startDueRuns` claims only while a slot is free. Accurate, immediate, and it does not strand a restarted worker behind its own stale `running` rows.
+**Consequence.** The limit is per worker, not global. Run one worker (CURRENT_STATE known issue 8).
+
+### D-035 The integration lease is taken inside the per-workspace mutex
+**Context.** The lease was acquired before `PerKeyMutex.run`. Two approved tasks in one workspace both acquired it (the holder check passes for the same `workerId`); when the first finished, its release cleared the lease while the second was still queued on the mutex, so the second integrated into the main tree holding no cross-process lock.
+**Decision.** Claim the task (`approved → integrating`), then take the lease inside the mutex and release it in the same scope. If another worker holds it, the task is set back to `approved` and retried on a later tick.
+
+### D-036 The agent event stream always terminates
+**Context.** The worker consumes `handle.events` with `for await` and has no timeout of its own, while its heartbeat keeps refreshing. If a session's exit notification was lost, the stream never ended: the task sat in `running` forever and stale-run recovery — which looks for a *stopped* heartbeat — never reclaimed it.
+**Decision.** `startTerminalRun` routes every terminal event through one `settle()`, and after a kill (timeout or cancellation) it ends the stream itself if no exit arrives within `EXIT_GRACE_MS` (10 s, overridable for tests).
+
+### D-037 A run's failure keeps the CLI's own explanation
+**Context.** A CLI can report a success-shaped result that is actually a failure, then exit non-zero; the runtime overrides the outcome on the exit code, and the worker keeps the last `finished` event. That correctly produced `failed` — and threw away the summary, so the UI showed a failure with no reason.
+**Decision.** `startTerminalRun` remembers the last non-empty `finished` summary and passes it to `onExit` as `state.summary`; the runtimes carry it into the overriding event. Verified against the real claude-code CLI: the run ends `failed` exit 1 with summary "Not logged in · Please run /login".
