@@ -5,8 +5,8 @@ import type { FastifyInstance } from 'fastify';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WS_CLOSE, type AgentMessage, type AgentMessageOf, type ClientMessage } from '@notea/protocol';
-import { AgentHub, FsService, SessionManager, createAgentServer, silentLogger, type AgentServer } from '@notea/workspace-agent';
-import { fakePtyFactory, type FakePty } from '@notea/workspace-agent/testing';
+import { AgentHub, FsService, ProcessManager, SessionManager, createAgentServer, silentLogger, type AgentServer } from '@notea/workspace-agent';
+import { fakeProcessFactory, fakePtyFactory, type FakePty } from '@notea/workspace-agent/testing';
 import { buildApp } from '../src/app';
 import type { WorkspaceRuntimeApi } from '../src/docker/workspace-runtime';
 import { RuntimeError } from '../src/errors';
@@ -93,8 +93,17 @@ beforeAll(async () => {
     scrollbackBytes: 1024,
     idGenerator: () => `s${++counter}`,
   });
+  const processes = new ProcessManager({
+    spawn: fakeProcessFactory().factory,
+    defaultCwd: projectDir,
+    baseEnv: {},
+    maxProcesses: 4,
+    maxOutputBytes: 1024 * 1024,
+    defaultTimeoutMs: 60_000,
+  });
   const hub = new AgentHub({
     sessions,
+    processes,
     fs: new FsService(projectDir),
     workspaceId: WORKSPACE_ID,
     projectDir,

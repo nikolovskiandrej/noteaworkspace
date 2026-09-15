@@ -14,8 +14,9 @@ import { FsService } from '../src/fs-service';
 import { AgentHub } from '../src/hub';
 import { silentLogger } from '../src/logger';
 import { createAgentServer, type AgentServer } from '../src/server';
+import { ProcessManager } from '../src/process-manager';
 import { SessionManager } from '../src/session-manager';
-import { fakePtyFactory, type FakePty } from '../src/testing';
+import { fakeProcessFactory, fakePtyFactory, type FakeProcess, type FakePty } from '../src/testing';
 
 const TOKEN = 'test-token-with-enough-length';
 
@@ -86,7 +87,9 @@ class TestClient {
 let server: AgentServer;
 let port: number;
 let spawned: FakePty[];
+let spawnedProcesses: FakeProcess[];
 let sessions: SessionManager;
+let processes: ProcessManager;
 let projectDir: string;
 
 function identity(overrides: Partial<ClientIdentity> = {}): ClientIdentity {
@@ -117,8 +120,21 @@ beforeEach(async () => {
     scrollbackBytes: 1024,
     idGenerator: () => `s${++counter}`,
   });
+  const fakeProcs = fakeProcessFactory();
+  spawnedProcesses = fakeProcs.spawned;
+  let execCounter = 0;
+  processes = new ProcessManager({
+    spawn: fakeProcs.factory,
+    defaultCwd: projectDir,
+    baseEnv: { PATH: '/usr/bin' },
+    maxProcesses: 4,
+    maxOutputBytes: 1024 * 1024,
+    defaultTimeoutMs: 60_000,
+    idGenerator: () => `e${++execCounter}`,
+  });
   const hub = new AgentHub({
     sessions,
+    processes,
     fs: new FsService(projectDir),
     workspaceId: 'ws-test',
     projectDir,
@@ -141,6 +157,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await server.close();
   sessions.dispose();
+  processes.dispose();
   await fsp.rm(projectDir, { recursive: true, force: true });
 });
 
@@ -283,6 +300,58 @@ describe('agent server + hub', () => {
     client.send({ type: 'fs.write', reqId: 'r4', path: 'hello.txt', content: 'bye\n', expectedEtag: content.etag });
     expect((await client.nextOfType('fs.written')).path).toBe('hello.txt');
     client.close();
+  });
+
+  it('runs exec processes for the requesting client only and kills them on disconnect', async () => {
+    const owner = await connectIdentified(identity());
+    const other = await connectIdentified(identity({ id: 'conn-2', userId: 'u2', name: 'Other', role: 'editor' }));
+
+    owner.send({ type: 'exec.start', reqId: 'x1', command: 'git status', shell: true, env: { GIT_PAGER: 'cat' } });
+    const started = await owner.nextOfType('exec.started');
+    expect(started).toMatchObject({ reqId: 'x1', execId: 'e1' });
+    expect(spawnedProcesses[0]?.options.args).toEqual(['-lc', 'git status']);
+    expect(spawnedProcesses[0]?.options.env).toEqual({ PATH: '/usr/bin', GIT_PAGER: 'cat' });
+
+    spawnedProcesses[0]?.emitStdout('clean\n');
+    expect(await owner.nextOfType('exec.output')).toEqual({ type: 'exec.output', execId: 'e1', stream: 'stdout', data: 'clean\n' });
+
+    // Another client cannot write to or kill somebody else's process.
+    other.send({ type: 'exec.kill', reqId: 'k1', execId: 'e1' });
+    expect((await other.nextOfType('error')).code).toBe('not_found');
+
+    owner.send({ type: 'exec.stdin', execId: 'e1', data: 'q', end: true });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(spawnedProcesses[0]?.stdin).toEqual(['q']);
+    expect(spawnedProcesses[0]?.stdinEnded).toBe(true);
+
+    spawnedProcesses[0]?.emitExit(0);
+    expect(await owner.nextOfType('exec.exit')).toEqual({ type: 'exec.exit', execId: 'e1', exitCode: 0, signal: null, timedOut: false });
+
+    // Reserved environment names are rejected by validation.
+    owner.send({ type: 'exec.start', reqId: 'x2', command: 'env', env: { PATH: '/tmp' } });
+    expect((await owner.nextOfType('error')).code).toBe('bad_request');
+
+    owner.send({ type: 'exec.start', reqId: 'x3', command: 'sleep', args: ['100'] });
+    await owner.nextOfType('exec.started');
+    owner.close();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(spawnedProcesses[1]?.killSignals).toEqual(['SIGTERM']);
+    other.close();
+  });
+
+  it('broadcasts fs.changed after file writes and passes env to terminals', async () => {
+    const writer = await connectIdentified(identity());
+    const watcher = await connectIdentified(identity({ id: 'conn-w', userId: 'w', name: 'Watcher', role: 'viewer' }));
+    writer.send({ type: 'fs.write', reqId: 'w1', path: 'notes.md', content: 'x' });
+    const written = await writer.nextOfType('fs.written');
+    const changed = await watcher.nextOfType('fs.changed');
+    expect(changed).toMatchObject({ path: 'notes.md', kind: 'write', etag: written.etag, by: { userId: 'u1', kind: 'user' } });
+
+    writer.send({ type: 'term.create', reqId: 't1', cols: 80, rows: 24, env: { ANTHROPIC_API_KEY: 'sk-test' } });
+    await writer.nextOfType('term.created');
+    expect(spawned[0]?.options.env).toMatchObject({ ANTHROPIC_API_KEY: 'sk-test' });
+    writer.close();
+    watcher.close();
   });
 
   it('reports validation errors without closing identified connections', async () => {

@@ -12,10 +12,12 @@ import {
 import { AgentError, errorMessage } from './errors';
 import type { FsService } from './fs-service';
 import type { Logger } from './logger';
+import type { ProcessManager } from './process-manager';
 import type { SessionManager } from './session-manager';
 
 export interface HubOptions {
   sessions: SessionManager;
+  processes: ProcessManager;
   fs: FsService;
   workspaceId: string;
   projectDir: string;
@@ -63,6 +65,16 @@ export class AgentHub {
     });
     sessions.on('attached', () => this.broadcastPresence());
     sessions.on('detached', () => this.broadcastPresence());
+
+    const { processes } = opts;
+    processes.on('output', (execId, ownerId, stream, data) => {
+      const owner = this.clients.get(ownerId);
+      if (owner) this.send(owner, { type: 'exec.output', execId, stream, data });
+    });
+    processes.on('exit', (execId, ownerId, exitCode, signal, timedOut) => {
+      const owner = this.clients.get(ownerId);
+      if (owner) this.send(owner, { type: 'exec.exit', execId, exitCode, signal, timedOut });
+    });
   }
 
   /** Registers a freshly authenticated socket. The first frame must be `identify`. */
@@ -206,6 +218,7 @@ export class AgentHub {
           args: message.args,
           title: message.title,
           createdBy: { userId: identity.userId, name: identity.name, kind: identity.kind },
+          env: message.env,
         });
         const attach = message.attach !== false;
         if (attach) sessions.attach(session.id, client.id);
@@ -257,8 +270,41 @@ export class AgentHub {
         requireRole(identity, 'editor');
         void this.respondAsync(client, message.reqId, async () => {
           const result = await fs.write(message.path, message.content, message.expectedEtag);
+          this.broadcast({
+            type: 'fs.changed',
+            path: result.path,
+            kind: 'write',
+            etag: result.etag,
+            by: { userId: identity.userId, name: identity.name, kind: identity.kind },
+          });
           return { type: 'fs.written', reqId: message.reqId, ...result };
         });
+        return;
+      case 'exec.start': {
+        requireRole(identity, 'editor');
+        void this.respondAsync(client, message.reqId, async () => {
+          const cwd = message.cwd ? await this.opts.fs.resolveAnyDir(message.cwd) : undefined;
+          const { execId, pid } = this.opts.processes.start({
+            ownerId: client.id,
+            command: message.command,
+            args: message.args,
+            shell: message.shell,
+            cwd,
+            env: message.env,
+            timeoutMs: message.timeoutMs,
+          });
+          return { type: 'exec.started', reqId: message.reqId, execId, pid };
+        });
+        return;
+      }
+      case 'exec.stdin':
+        requireRole(identity, 'editor');
+        this.opts.processes.writeStdin(message.execId, client.id, message.data, message.end === true);
+        return;
+      case 'exec.kill':
+        requireRole(identity, 'editor');
+        this.opts.processes.kill(message.execId, client.id);
+        this.send(client, { type: 'exec.killed', reqId: message.reqId, execId: message.execId });
         return;
       default: {
         const exhaustive: never = message;
@@ -289,6 +335,7 @@ export class AgentHub {
     if (!client.identity) return;
     this.clients.delete(client.id);
     this.opts.sessions.detachAll(client.id);
+    this.opts.processes.killOwnedBy(client.id);
     this.opts.log.info('client disconnected', { clientId: client.id });
     this.broadcastPresence();
   }

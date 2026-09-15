@@ -27,6 +27,8 @@ export interface CreateSessionInput {
   args?: string[];
   title?: string;
   createdBy: TerminalCreator | null;
+  /** Extra environment merged over the agent's base environment for this session. */
+  env?: Record<string, string>;
 }
 
 export interface SessionEvents {
@@ -85,7 +87,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
         command,
         args,
         cwd,
-        env: this.opts.env,
+        env: input.env ? { ...this.opts.env, ...input.env } : this.opts.env,
         cols: input.cols,
         rows: input.rows,
       });

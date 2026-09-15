@@ -16,6 +16,7 @@ export function FileTree({ selectedPath, onSelect }: { selectedPath: string | nu
 
   const load = useCallback(
     async (path: string) => {
+      if (!client) return;
       try {
         const reply = await client.listFiles(path);
         setDirs((prev) => ({ ...prev, [path]: { entries: reply.entries, error: null } }));

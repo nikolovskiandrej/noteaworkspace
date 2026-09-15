@@ -16,6 +16,7 @@ export function TerminalPanel({ canInput }: { canInput: boolean }) {
   }, [sessions, activeId]);
 
   const createTerminal = async () => {
+    if (!client) return;
     setError(null);
     try {
       const reply = await client.createTerminal({ cols: 120, rows: 30, attach: false });
@@ -26,6 +27,7 @@ export function TerminalPanel({ canInput }: { canInput: boolean }) {
   };
 
   const killTerminal = async (sessionId: string) => {
+    if (!client) return;
     try {
       await client.killTerminal(sessionId);
     } catch (err) {
@@ -80,7 +82,7 @@ export function TerminalPanel({ canInput }: { canInput: boolean }) {
       </div>
       {error ? <p className="bg-rose-500/10 px-3 py-1 text-xs text-rose-300">{error}</p> : null}
       <div className="min-h-0 flex-1 p-1">
-        {activeId ? (
+        {activeId && client ? (
           <Terminal key={activeId} client={client} sessionId={activeId} canInput={canInput} />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-[#6f7782]">

@@ -3,8 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ClientIdentity } from '@notea/protocol';
-import { AgentHub, FsService, SessionManager, createAgentServer, silentLogger, type AgentServer } from '@notea/workspace-agent';
-import { fakePtyFactory, type FakePty } from '@notea/workspace-agent/testing';
+import { AgentHub, FsService, ProcessManager, SessionManager, createAgentServer, silentLogger, type AgentServer } from '@notea/workspace-agent';
+import { fakeProcessFactory, fakePtyFactory, type FakePty, type FakeProcess } from '@notea/workspace-agent/testing';
 import { WorkspaceClient, WorkspaceRequestError } from '../src/client';
 
 const TOKEN = 'client-test-token-1234567890';
@@ -24,6 +24,7 @@ function identifyingWebSocket(identity: ClientIdentity): typeof WebSocket {
 let server: AgentServer;
 let port: number;
 let spawned: FakePty[];
+let spawnedProcesses: FakeProcess[];
 let projectDir: string;
 let sessions: SessionManager;
 
@@ -41,8 +42,19 @@ async function startServer(listenPort = 0): Promise<number> {
     scrollbackBytes: 1024,
     idGenerator: () => `s${++counter}`,
   });
+  const fakeProcs = fakeProcessFactory();
+  spawnedProcesses = fakeProcs.spawned;
+  const processes = new ProcessManager({
+    spawn: fakeProcs.factory,
+    defaultCwd: projectDir,
+    baseEnv: {},
+    maxProcesses: 4,
+    maxOutputBytes: 1024 * 1024,
+    defaultTimeoutMs: 60_000,
+  });
   const hub = new AgentHub({
     sessions,
+    processes,
     fs: new FsService(projectDir),
     workspaceId: 'ws-client',
     projectDir,
@@ -147,6 +159,24 @@ describe('WorkspaceClient', () => {
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(client.state).not.toBe('closed');
     expect(calls).toBeGreaterThan(1);
+    client.close();
+  });
+
+  it('runs an exec to completion and collects its output', async () => {
+    const client = new WorkspaceClient({
+      url: `ws://127.0.0.1:${port}/ws?token=${TOKEN}`,
+      WebSocketImpl: identifyingWebSocket(identity),
+    });
+    await client.waitForHello();
+    const chunks: string[] = [];
+    const resultPromise = client.runExec({ command: 'git status', shell: true }, (stream, data) => chunks.push(`${stream}:${data}`));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    spawnedProcesses[0]?.emitStdout('clean\n');
+    spawnedProcesses[0]?.emitStderr('warn\n');
+    spawnedProcesses[0]?.emitExit(0);
+    const result = await resultPromise;
+    expect(result).toMatchObject({ exitCode: 0, signal: null, timedOut: false, stdout: 'clean\n', stderr: 'warn\n' });
+    expect(chunks).toEqual(['stdout:clean\n', 'stderr:warn\n']);
     client.close();
   });
 

@@ -158,6 +158,23 @@ export class FsService {
     return abs;
   }
 
+  /**
+   * Resolves a working directory for a process: relative paths are taken from the
+   * project root; absolute paths are allowed anywhere (the container is the boundary)
+   * but must exist and be directories.
+   */
+  async resolveAnyDir(clientPath: string): Promise<string> {
+    const abs = path.isAbsolute(clientPath) ? path.normalize(clientPath) : path.resolve(this.rootDir, clientPath);
+    let stat;
+    try {
+      stat = await fsp.stat(abs);
+    } catch (err) {
+      throw translateFsError(err, clientPath);
+    }
+    if (!stat.isDirectory()) throw new AgentError('bad_request', `${clientPath} is not a directory`);
+    return abs;
+  }
+
   private toClientPath(abs: string): string {
     const rel = path.relative(this.rootDir, abs);
     return rel.split(path.sep).join('/');

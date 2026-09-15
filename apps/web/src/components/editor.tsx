@@ -62,7 +62,7 @@ export function Editor({ path, canWrite }: { path: string | null; canWrite: bool
   const [message, setMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!path || !containerRef.current) return;
+    if (!path || !containerRef.current || !client) return;
     setStatus('loading');
     setMessage(null);
     handleRef.current?.destroy();
@@ -90,7 +90,7 @@ export function Editor({ path, canWrite }: { path: string | null; canWrite: bool
 
   const save = useCallback(
     async (force = false) => {
-      if (!path || !handleRef.current || !canWrite) return;
+      if (!path || !handleRef.current || !canWrite || !client) return;
       setStatus('saving');
       try {
         const reply = await client.writeFile(path, handleRef.current.getValue(), force ? undefined : (etagRef.current ?? undefined));

@@ -7,6 +7,7 @@ import { DEFAULT_AGENT_PORT } from '@notea/protocol';
 import { FsService } from './fs-service';
 import { AgentHub } from './hub';
 import { createLogger, type LogLevel } from './logger';
+import { ProcessManager, createNodeProcessFactory } from './process-manager';
 import { createNodePtyFactory } from './pty';
 import { createAgentServer } from './server';
 import { SessionManager } from './session-manager';
@@ -76,8 +77,17 @@ async function main(): Promise<void> {
     scrollbackBytes: config.scrollbackBytes,
   });
   const fs = new FsService(config.projectDir);
+  const processes = new ProcessManager({
+    spawn: createNodeProcessFactory(),
+    defaultCwd: config.projectDir,
+    baseEnv: terminalEnv(process.env, config),
+    maxProcesses: 16,
+    maxOutputBytes: 8 * 1024 * 1024,
+    defaultTimeoutMs: 10 * 60 * 1000,
+  });
   const hub = new AgentHub({
     sessions,
+    processes,
     fs,
     workspaceId: config.workspaceId,
     projectDir: config.projectDir,
@@ -102,6 +112,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     log.info('shutting down', { signal });
     sessions.dispose();
+    processes.dispose();
     void server.close().then(() => process.exit(0));
     setTimeout(() => process.exit(0), 3000).unref();
   };

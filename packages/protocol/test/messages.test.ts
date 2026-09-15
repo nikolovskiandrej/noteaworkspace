@@ -32,6 +32,17 @@ describe('parseClientMessage', () => {
     }
   });
 
+  it('validates injected environment variables', () => {
+    const ok = parseClientMessage(
+      JSON.stringify({ type: 'exec.start', reqId: 'r1', command: 'claude', env: { ANTHROPIC_API_KEY: 'k', PORT: '3000' } }),
+    );
+    expect(ok.ok).toBe(true);
+    for (const env of [{ PATH: '/x' }, { NOTEA_AGENT_TOKEN: 'x' }, { lower: 'x' }, { LD_PRELOAD: 'x' }]) {
+      const bad = parseClientMessage(JSON.stringify({ type: 'exec.start', reqId: 'r1', command: 'x', env }));
+      expect(bad.ok).toBe(false);
+    }
+  });
+
   it('rejects identify frames with an invalid role', () => {
     const result = parseClientMessage(
       JSON.stringify({

@@ -125,6 +125,29 @@ describeE2E('docker end-to-end', () => {
 
       send(ws, { type: 'fs.write', reqId: 'w1', path: 'hello.txt', content: 'persisted\n' });
       await waitFor(ws, 'fs.written');
+
+      // exec: a real child process with streamed output and an injected variable.
+      let execOut = '';
+      const execExit = waitFor(ws, 'exec.exit');
+      const execOutputs = waitFor(ws, 'exec.output', (m) => {
+        execOut += m.data;
+        return execOut.includes('exec-ok');
+      });
+      send(ws, {
+        type: 'exec.start',
+        reqId: 'x1',
+        command: 'git --version && echo "exec-ok $NOTEA_TEST_VAR" && cat hello.txt',
+        shell: true,
+        env: { NOTEA_TEST_VAR: 'injected' },
+      });
+      const started = await waitFor(ws, 'exec.started');
+      expect(started.pid).toBeGreaterThan(0);
+      await execOutputs;
+      const exit = await execExit;
+      expect(exit).toMatchObject({ execId: started.execId, exitCode: 0, timedOut: false });
+      expect(execOut).toContain('git version');
+      expect(execOut).toContain('exec-ok injected');
+      expect(execOut).toContain('persisted');
       ws.close();
 
       // Stop and start: the container restarts, the volume keeps the file.

@@ -1,1 +1,7 @@
-export { WorkspaceClient, WorkspaceRequestError, type ConnectionState, type WorkspaceClientOptions } from './client';
+export {
+  WorkspaceClient,
+  WorkspaceRequestError,
+  type ConnectionState,
+  type ExecResult,
+  type WorkspaceClientOptions,
+} from './client';

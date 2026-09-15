@@ -44,7 +44,20 @@ type ResponseTypeOf<T extends ClientMessage['type']> = T extends 'term.create'
               ? 'fs.written'
               : T extends 'ping'
                 ? 'pong'
-                : never;
+                : T extends 'exec.start'
+                  ? 'exec.started'
+                  : T extends 'exec.kill'
+                    ? 'exec.killed'
+                    : never;
+
+export interface ExecResult {
+  execId: string;
+  exitCode: number | null;
+  signal: string | null;
+  timedOut: boolean;
+  stdout: string;
+  stderr: string;
+}
 
 type RequestMessage = Extract<ClientMessage, { reqId: string }> | ClientMessageOf<'ping'>;
 type RequestInput<T extends RequestMessage['type']> = Omit<ClientMessageOf<T>, 'reqId'>;
@@ -225,6 +238,65 @@ export class WorkspaceClient {
 
   ping() {
     return this.request<'ping'>({ type: 'ping' });
+  }
+
+  startExec(input: Omit<RequestInput<'exec.start'>, 'type'>) {
+    return this.request<'exec.start'>({ type: 'exec.start', ...input });
+  }
+
+  execStdin(execId: string, data: string, end = false): void {
+    this.send({ type: 'exec.stdin', execId, data, end });
+  }
+
+  killExec(execId: string) {
+    return this.request<'exec.kill'>({ type: 'exec.kill', execId });
+  }
+
+  /**
+   * Starts a process and resolves when it exits, with its collected output. Suitable
+   * for git and check commands; use `onOutput` to stream progress.
+   */
+  async runExec(
+    input: Omit<RequestInput<'exec.start'>, 'type'>,
+    onOutput?: (stream: 'stdout' | 'stderr', data: string) => void,
+  ): Promise<ExecResult> {
+    let stdout = '';
+    let stderr = '';
+    let execId: string | null = null;
+    const buffered: Array<AgentMessageOf<'exec.output'> | AgentMessageOf<'exec.exit'>> = [];
+    let settle: ((result: ExecResult) => void) | null = null;
+
+    const handle = (message: AgentMessageOf<'exec.output'> | AgentMessageOf<'exec.exit'>) => {
+      if (message.type === 'exec.output') {
+        if (message.stream === 'stdout') stdout += message.data;
+        else stderr += message.data;
+        onOutput?.(message.stream, message.data);
+      } else {
+        settle?.({ execId: message.execId, exitCode: message.exitCode, signal: message.signal, timedOut: message.timedOut, stdout, stderr });
+      }
+    };
+    // Output can arrive before `exec.started` is processed; buffer until the id is known.
+    const offOutput = this.on('exec.output', (message) => {
+      if (execId === null) buffered.push(message);
+      else if (message.execId === execId) handle(message);
+    });
+    const offExit = this.on('exec.exit', (message) => {
+      if (execId === null) buffered.push(message);
+      else if (message.execId === execId) handle(message);
+    });
+    try {
+      const done = new Promise<ExecResult>((resolve) => {
+        settle = resolve;
+      });
+      const started = await this.startExec(input);
+      execId = started.execId;
+      for (const message of buffered) if (message.execId === execId) handle(message);
+      buffered.length = 0;
+      return await done;
+    } finally {
+      offOutput();
+      offExit();
+    }
   }
 
   /** Closes the connection permanently (no reconnect). */

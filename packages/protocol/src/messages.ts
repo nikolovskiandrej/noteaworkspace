@@ -17,7 +17,9 @@
  */
 import { z } from 'zod';
 
+/** Major version; additive 1.x features: exec.*, fs.changed, term.create.env. */
 export const PROTOCOL_VERSION = 1 as const;
+export const PROTOCOL_MINOR_VERSION = 1 as const;
 
 export const AGENT_WS_PATH = '/ws';
 export const AGENT_HEALTH_PATH = '/healthz';
@@ -105,6 +107,22 @@ const FsPath = z.string().max(4096);
 export const MAX_TERMINAL_INPUT_CHARS = 1_000_000;
 export const MAX_FILE_CONTENT_CHARS = 2_000_000;
 
+/**
+ * Environment variables a client may inject into a terminal or exec. Names must be
+ * upper-case identifiers; a small set that would change how the agent's own tools
+ * resolve is rejected. Provider credentials (ANTHROPIC_API_KEY, ...) pass through.
+ */
+const EnvName = z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/);
+const FORBIDDEN_ENV = new Set(['PATH', 'HOME', 'USER', 'SHELL', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'NODE_OPTIONS']);
+export const EnvSchema = z
+  .record(EnvName, z.string().max(8192))
+  .refine((env) => Object.keys(env).length <= 64, 'at most 64 environment variables')
+  .refine(
+    (env) => Object.keys(env).every((key) => !FORBIDDEN_ENV.has(key) && !key.startsWith('NOTEA_')),
+    'environment contains a reserved variable',
+  );
+export type InjectedEnv = z.infer<typeof EnvSchema>;
+
 export const IdentifyMessageSchema = z.object({
   type: z.literal('identify'),
   client: ClientIdentitySchema,
@@ -128,6 +146,41 @@ export const TermCreateMessageSchema = z.object({
   title: z.string().max(200).optional(),
   /** Attach the creating client immediately (default true). */
   attach: z.boolean().optional(),
+  /** Extra environment for this session only (e.g. provider credentials for an agent run). */
+  env: EnvSchema.optional(),
+});
+
+// ---- exec: non-interactive processes with streamed output (protocol 1.1) --------
+
+const ExecId = z.string().min(1).max(64);
+
+export const ExecStartMessageSchema = z.object({
+  type: z.literal('exec.start'),
+  reqId: ReqId,
+  /** Program to run, or a shell command line when `shell` is true. */
+  command: z.string().min(1).max(8192),
+  args: z.array(z.string().max(8192)).max(256).optional(),
+  /** Run through `/bin/bash -lc <command>` (args are not allowed then). */
+  shell: z.boolean().optional(),
+  /** Absolute path or relative to the project directory. */
+  cwd: z.string().max(4096).optional(),
+  env: EnvSchema.optional(),
+  /** Kill the process after this long (default 10 minutes, max 60). */
+  timeoutMs: z.number().int().min(1000).max(3_600_000).optional(),
+});
+
+export const ExecStdinMessageSchema = z.object({
+  type: z.literal('exec.stdin'),
+  execId: ExecId,
+  data: z.string().max(MAX_TERMINAL_INPUT_CHARS),
+  /** Close stdin after writing. */
+  end: z.boolean().optional(),
+});
+
+export const ExecKillMessageSchema = z.object({
+  type: z.literal('exec.kill'),
+  reqId: ReqId,
+  execId: ExecId,
 });
 
 export const TermAttachMessageSchema = z.object({
@@ -199,6 +252,9 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   FsListMessageSchema,
   FsReadMessageSchema,
   FsWriteMessageSchema,
+  ExecStartMessageSchema,
+  ExecStdinMessageSchema,
+  ExecKillMessageSchema,
 ]);
 
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
@@ -266,7 +322,17 @@ export type AgentMessage =
       size: number;
       mtimeMs: number;
     }
-  | { type: 'fs.written'; reqId: string; path: string; etag: string; size: number; mtimeMs: number };
+  | { type: 'fs.written'; reqId: string; path: string; etag: string; size: number; mtimeMs: number }
+  /**
+   * Broadcast when a file changes through the file API (protocol 1.1). Changes made
+   * from terminals are not detected yet; the editor's etag check still catches them.
+   */
+  | { type: 'fs.changed'; path: string; kind: 'write'; etag: string; by: { userId: string; name: string; kind: ClientKind } }
+  // exec (protocol 1.1): output and exit go only to the client that started the process
+  | { type: 'exec.started'; reqId: string; execId: string; pid: number }
+  | { type: 'exec.output'; execId: string; stream: 'stdout' | 'stderr'; data: string }
+  | { type: 'exec.exit'; execId: string; exitCode: number | null; signal: string | null; timedOut: boolean }
+  | { type: 'exec.killed'; reqId: string; execId: string };
 
 export type AgentMessageOf<T extends AgentMessage['type']> = Extract<AgentMessage, { type: T }>;
 
