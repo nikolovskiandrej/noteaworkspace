@@ -113,7 +113,26 @@ export class WorkspaceRuntime implements WorkspaceRuntimeApi {
   }
 
   async start(workspaceId: string): Promise<WorkspaceRuntimeInfo> {
-    const container = this.docker.getContainer(containerName(validateWorkspaceId(workspaceId)));
+    validateWorkspaceId(workspaceId);
+    const raw = await this.rawInspect(workspaceId);
+    if (!raw) throw notFound(workspaceId);
+    if (raw.State.Status !== 'running' && (await this.imageOutdated(raw))) {
+      // The image was rebuilt (e.g. a new agent): recreate the container, keep the volume.
+      this.opts.log.info({ workspaceId, image: raw.Config.Image }, 'recreating workspace container with the current image');
+      await this.docker.getContainer(raw.Id).remove({ force: true, v: false });
+      const spec = buildContainerSpec({
+        workspaceId,
+        image: raw.Config.Labels?.[IMAGE_LABEL] ?? this.opts.image,
+        network: this.opts.network,
+        agentToken: this.opts.agentTokenFor(workspaceId),
+        agentPort: this.opts.agentPort,
+        resources: resourcesOf(raw) ?? this.opts.defaultResources,
+        publishAgentPort: this.opts.publishAgentPort,
+      });
+      await this.ensureNetwork();
+      await this.docker.createContainer(spec);
+    }
+    const container = this.docker.getContainer(containerName(workspaceId));
     try {
       await container.start();
     } catch (err) {
@@ -121,6 +140,17 @@ export class WorkspaceRuntime implements WorkspaceRuntimeApi {
       if (!isDockerStatus(err, 304)) throw err; // 304: already running
     }
     return this.mustInspect(workspaceId);
+  }
+
+  /** True when the image tag the container was created from now points at a different image. */
+  private async imageOutdated(raw: Docker.ContainerInspectInfo): Promise<boolean> {
+    const imageName = raw.Config.Labels?.[IMAGE_LABEL] ?? raw.Config.Image;
+    try {
+      const current = await this.docker.getImage(imageName).inspect();
+      return current.Id !== raw.Image;
+    } catch {
+      return false; // image missing locally: leave the container as is
+    }
   }
 
   async stop(workspaceId: string): Promise<WorkspaceRuntimeInfo> {
@@ -229,20 +259,23 @@ function notFound(workspaceId: string): RuntimeError {
   return new RuntimeError(404, 'not_found', `workspace runtime ${workspaceId} not found`);
 }
 
-function toInfo(workspaceId: string, raw: Docker.ContainerInspectInfo): WorkspaceRuntimeInfo {
+function resourcesOf(raw: Docker.ContainerInspectInfo): WorkspaceResources | null {
   const hostConfig = raw.HostConfig as {
     NanoCpus?: number;
     Memory?: number;
     PidsLimit?: number | null;
   };
-  const resources: WorkspaceResources | null =
-    hostConfig.NanoCpus && hostConfig.Memory
-      ? {
-          cpus: hostConfig.NanoCpus / 1e9,
-          memoryMb: Math.round(hostConfig.Memory / (1024 * 1024)),
-          pidsLimit: hostConfig.PidsLimit ?? 0,
-        }
-      : null;
+  return hostConfig.NanoCpus && hostConfig.Memory
+    ? {
+        cpus: hostConfig.NanoCpus / 1e9,
+        memoryMb: Math.round(hostConfig.Memory / (1024 * 1024)),
+        pidsLimit: hostConfig.PidsLimit ?? 0,
+      }
+    : null;
+}
+
+function toInfo(workspaceId: string, raw: Docker.ContainerInspectInfo): WorkspaceRuntimeInfo {
+  const resources = resourcesOf(raw);
   return {
     workspaceId,
     status: mapStatus(raw.State.Status, raw.State.Error),
