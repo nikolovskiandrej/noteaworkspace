@@ -32,6 +32,17 @@ const EnvSchema = z.object({
   WORKSPACE_DEFAULT_MEMORY_MB: z.coerce.number().int().positive().default(4096),
   WORKSPACE_DEFAULT_PIDS_LIMIT: z.coerce.number().int().positive().default(2048),
 
+  /**
+   * Unix uid range agent processes may run as. Each Notea user gets one uid from
+   * this range (users.agent_uid); it must stay clear of the image's `dev` user
+   * (1000) and of every system uid, because that separation is what keeps one
+   * member from reading another's credential out of /proc.
+   */
+  AGENT_UID_MIN: z.coerce.number().int().min(1001).default(20_001),
+  AGENT_UID_MAX: z.coerce.number().int().min(1001).default(29_999),
+  /** Primary gid agent processes run with: the group that shares the project files. */
+  AGENT_GID: z.coerce.number().int().min(0).default(1000),
+
   CONNECT_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   CONNECT_TOKEN_MAX_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
 
@@ -54,6 +65,7 @@ export interface OrchestratorConfig {
   defaultResources: { cpus: number; memoryMb: number; pidsLimit: number };
   connectTokenTtlSeconds: number;
   connectTokenMaxTtlSeconds: number;
+  agentUidRange: { min: number; max: number; gid: number };
   devConsole: boolean;
 }
 
@@ -84,6 +96,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = p
     },
     connectTokenTtlSeconds: e.CONNECT_TOKEN_TTL_SECONDS,
     connectTokenMaxTtlSeconds: e.CONNECT_TOKEN_MAX_TTL_SECONDS,
+    agentUidRange: { min: e.AGENT_UID_MIN, max: e.AGENT_UID_MAX, gid: e.AGENT_GID },
     devConsole: e.DEV_CONSOLE === 'true',
   };
 }

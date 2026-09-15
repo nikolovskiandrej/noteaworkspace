@@ -154,6 +154,7 @@ describeDb('reapWorkspace', () => {
     db: handle.db,
     runtimes: new Map(),
     connect: async () => ({ session: fakeSession(), runner, close: () => undefined }),
+    isolate: () => fakeSession(),
     credentialsKey: null,
     workerId: 'reaper-test',
     log,

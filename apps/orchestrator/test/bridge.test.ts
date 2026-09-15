@@ -12,6 +12,13 @@ import type { WorkspaceRuntimeApi } from '../src/docker/workspace-runtime';
 import { RuntimeError } from '../src/errors';
 import { TokenService } from '../src/tokens';
 
+const noAgentExec = {
+  start: async () => {
+    throw new Error('agent exec not available in this test');
+  },
+  kill: async () => undefined,
+};
+
 const API_KEY = 'orchestrator-test-api-key';
 const WORKSPACE_ID = 'ws-bridge';
 
@@ -137,7 +144,7 @@ beforeAll(async () => {
     agentEndpoint: async (id) => (id === WORKSPACE_ID ? { host: '127.0.0.1', port: agentPort } : null),
     waitForAgent: async () => ({ host: '127.0.0.1', port: agentPort }),
   };
-  app = await buildApp({ runtime, tokens, apiKey: API_KEY });
+  app = await buildApp({ runtime, tokens, apiKey: API_KEY, agentExec: noAgentExec });
   await app.listen({ port: 0, host: '127.0.0.1' });
   const address = app.server.address();
   if (!address || typeof address === 'string') throw new Error('no address');

@@ -2,6 +2,27 @@ import type { ClientIdentity } from '@notea/protocol';
 
 export type ProviderId = 'anthropic' | 'openai' | 'google';
 
+/**
+ * How a provider credential authenticates, which decides both the environment
+ * variable it becomes and who pays. Kept explicit everywhere so a subscription can
+ * never silently turn into metered API usage.
+ */
+export type AuthMode = 'subscription' | 'api_key';
+
+export interface AuthModeInfo {
+  id: AuthMode;
+  /** The single environment variable the CLI reads this credential from. */
+  env: string;
+  /** Shown in the UI, e.g. "Claude subscription". */
+  label: string;
+  /** Shown in the UI next to the mode, e.g. "no API charges". */
+  billing: string;
+  /** Instruction for the user on how to obtain the secret themselves. */
+  obtain: string;
+  /** Shape check used to warn when a secret is pasted into the wrong mode. */
+  secretPattern?: RegExp;
+}
+
 export interface ModelInfo {
   id: string;
   label: string;
@@ -14,7 +35,7 @@ export interface ModelInfo {
 export interface ProviderInfo {
   id: ProviderId;
   name: string;
-  /** Environment variable the CLIs and SDKs read the API key from. */
+  /** Environment variable the CLIs and SDKs read the API key from (`api_key` mode). */
   credentialEnv: string;
   models: ModelInfo[];
 }
@@ -37,7 +58,11 @@ export interface AgentRunContext {
   /** The generated task brief (prompt). */
   brief: string;
   model: ModelRef | null;
-  /** Injected into the agent's session only (e.g. ANTHROPIC_API_KEY). */
+  /**
+   * The one credential variable for this run (e.g. CLAUDE_CODE_OAUTH_TOKEN *or*
+   * ANTHROPIC_API_KEY, never both). Injected into the agent process only, and only
+   * into a process running as the task owner's own uid.
+   */
   credentialEnv: Record<string, string>;
   identity: ClientIdentity;
   /** Wall-clock and spend limits; runtimes pass what their CLI supports. */
@@ -75,6 +100,11 @@ export interface WorkspaceSession {
     title: string;
     env?: Record<string, string>;
     attach?: boolean;
+    /**
+     * Hard deadline for the process, honoured by sessions whose transport can
+     * enforce one. A backstop for the run's own timer, not a replacement.
+     */
+    timeoutMs?: number;
   }): Promise<{ sessionId: string }>;
   killTerminal(sessionId: string): Promise<void>;
   onTerminalOutput(sessionId: string, listener: (data: string) => void): () => void;

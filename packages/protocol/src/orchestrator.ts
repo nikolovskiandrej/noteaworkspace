@@ -74,6 +74,54 @@ export interface ConnectTokenClaims {
   kind: ClientKind;
 }
 
+/**
+ * Runs one process inside a workspace container as a specific Unix uid.
+ *
+ * This exists because the in-container agent daemon runs as `dev` (uid 1000) and,
+ * with `CapDrop: ALL` + `no-new-privileges`, cannot change uid — only the Docker
+ * daemon can. Running each member's agent under their own uid is what stops one
+ * member reading another's provider credential out of `/proc/<pid>/environ`.
+ *
+ * The orchestrator refuses any uid outside the agent range, so this endpoint can
+ * never be used to obtain root or the `dev` user's identity.
+ */
+export interface AgentExecRequest {
+  /** Unix uid to run as. Must be inside the orchestrator's agent uid range. */
+  uid: number;
+  /** Argv. Not a shell string: the orchestrator never concatenates commands. */
+  cmd: string[];
+  /** Working directory inside the container. */
+  cwd?: string;
+  /** Extra environment for this process only. Names must be SHOUTY_SNAKE_CASE. */
+  env?: Record<string, string>;
+  /** Names to remove from the inherited environment before the process starts. */
+  unsetEnv?: string[];
+  /** Allocate a pty. Agent CLIs behave better with one; buffered runs do not need it. */
+  tty?: boolean;
+  /** Stream output as it arrives (NDJSON) instead of buffering it. */
+  stream?: boolean;
+  /** Kill the process after this many milliseconds. */
+  timeoutMs?: number;
+}
+
+/** Response of a buffered (`stream: false`) agent exec. */
+export interface AgentExecResult {
+  execId: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  /** True when output was cut at the orchestrator's cap. */
+  truncated: boolean;
+}
+
+/** One NDJSON frame of a streamed (`stream: true`) agent exec. */
+export type AgentExecFrame =
+  | { type: 'started'; execId: string }
+  | { type: 'out'; data: string }
+  | { type: 'err'; data: string }
+  | { type: 'exit'; exitCode: number | null; timedOut: boolean };
+
 export interface OrchestratorErrorBody {
   error: {
     code: string;

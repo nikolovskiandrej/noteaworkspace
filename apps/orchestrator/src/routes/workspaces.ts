@@ -1,7 +1,9 @@
 import { timingSafeEqual } from 'node:crypto';
+import { PassThrough } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ClientKindSchema, WorkspaceRoleSchema, type IssueConnectTokenResponse } from '@notea/protocol';
+import { ClientKindSchema, WorkspaceRoleSchema, type AgentExecFrame, type IssueConnectTokenResponse } from '@notea/protocol';
+import { collectAgentExec, type AgentExecRunner } from '../docker/agent-exec';
 import type { WorkspaceRuntimeApi } from '../docker/workspace-runtime';
 import { RuntimeError } from '../errors';
 import type { TokenService } from '../tokens';
@@ -32,10 +34,24 @@ const IssueConnectTokenSchema = z.object({
   ttlSeconds: z.number().int().positive().optional(),
 });
 
+const AgentExecSchema = z.object({
+  uid: z.number().int(),
+  cmd: z.array(z.string()).min(1).max(64),
+  cwd: z.string().max(4096).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  unsetEnv: z.array(z.string()).max(32).optional(),
+  tty: z.boolean().optional(),
+  stream: z.boolean().optional(),
+  timeoutMs: z.number().int().positive().optional(),
+});
+
+const KillAgentExecSchema = z.object({ uid: z.number().int() });
+
 export interface WorkspaceRoutesDeps {
   runtime: WorkspaceRuntimeApi;
   tokens: TokenService;
   apiKey: string;
+  agentExec: AgentExecRunner;
 }
 
 /**
@@ -87,6 +103,44 @@ export async function registerWorkspaceRoutes(app: FastifyInstance, deps: Worksp
     },
   );
 
+  /**
+   * Runs one process in a workspace container under a given Unix uid.
+   *
+   * The control plane is the only caller (shared API key, same as every other route
+   * here). The uid range and the fixed gid are enforced in `buildAgentExecOptions`,
+   * so a compromised control plane still cannot ask for root or for the `dev` user
+   * whose shells the workspace's humans share.
+   */
+  app.post<{ Params: { id: string } }>('/workspaces/:id/agent-exec', async (request, reply) => {
+    const body = parseBody(AgentExecSchema, request.body);
+    const containerId = await runningContainerId(deps, request.params.id);
+    const handle = await deps.agentExec.start(containerId, body);
+    if (body.stream !== true) return collectAgentExec(handle);
+
+    const frames = new PassThrough();
+    const write = (frame: AgentExecFrame) => {
+      if (!frames.writableEnded) frames.write(`${JSON.stringify(frame)}\n`);
+    };
+    write({ type: 'started', execId: handle.execId });
+    handle.stdout.on('data', (chunk: Buffer) => write({ type: 'out', data: chunk.toString('utf8') }));
+    handle.stderr.on('data', (chunk: Buffer) => write({ type: 'err', data: chunk.toString('utf8') }));
+    void handle.done
+      .then((outcome) => write({ type: 'exit', exitCode: outcome.exitCode, timedOut: outcome.timedOut }))
+      .catch(() => write({ type: 'exit', exitCode: null, timedOut: false }))
+      .finally(() => frames.end());
+    reply.header('content-type', 'application/x-ndjson');
+    reply.header('cache-control', 'no-store');
+    return reply.send(frames);
+  });
+
+  app.post<{ Params: { id: string; execId: string } }>('/workspaces/:id/agent-exec/:execId/kill', async (request, reply) => {
+    const body = parseBody(KillAgentExecSchema, request.body);
+    const containerId = await runningContainerId(deps, request.params.id);
+    await deps.agentExec.kill(containerId, request.params.execId, body.uid);
+    reply.code(204);
+    return null;
+  });
+
   app.post('/connect-tokens', async (request): Promise<IssueConnectTokenResponse> => {
     const body = parseBody(IssueConnectTokenSchema, request.body);
     const issued = await deps.tokens.issueConnectToken(
@@ -95,6 +149,15 @@ export async function registerWorkspaceRoutes(app: FastifyInstance, deps: Worksp
     );
     return { ...issued, wsPath: `/ws/workspaces/${encodeURIComponent(body.workspaceId)}` };
   });
+}
+
+async function runningContainerId(deps: WorkspaceRoutesDeps, workspaceId: string): Promise<string> {
+  const info = await deps.runtime.inspect(workspaceId);
+  if (!info) throw new RuntimeError(404, 'not_found', `workspace runtime ${workspaceId} not found`);
+  if (info.status !== 'running' || !info.containerId) {
+    throw new RuntimeError(409, 'not_running', `workspace ${workspaceId} is ${info.status}; start it first`);
+  }
+  return info.containerId;
 }
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {

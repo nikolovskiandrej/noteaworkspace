@@ -10,6 +10,13 @@ import type { WorkspaceRuntimeApi } from '../src/docker/workspace-runtime';
 import { RuntimeError } from '../src/errors';
 import { TokenService } from '../src/tokens';
 
+const noAgentExec = {
+  start: async () => {
+    throw new Error('agent exec not available in this test');
+  },
+  kill: async () => undefined,
+};
+
 const SECRET = 'connect-token-that-must-never-be-logged';
 
 function unusedRuntime(): WorkspaceRuntimeApi {
@@ -39,6 +46,7 @@ afterEach(async () => {
 async function appWithCapturedLog(): Promise<{ app: FastifyInstance; lines: string[] }> {
   const lines: string[] = [];
   const built = await buildApp({
+    agentExec: noAgentExec,
     runtime: unusedRuntime(),
     tokens: new TokenService({
       connectTokenSecret: 'c'.repeat(32),

@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { OrchestratorErrorBody } from '@notea/protocol';
+import type { AgentExecRunner } from './docker/agent-exec';
 import type { WorkspaceRuntimeApi } from './docker/workspace-runtime';
 import { RuntimeError } from './errors';
 import { registerBridge } from './routes/bridge';
@@ -12,6 +13,8 @@ export interface AppDeps {
   runtime: WorkspaceRuntimeApi;
   tokens: TokenService;
   apiKey: string;
+  /** Runs agent processes under a per-user uid; see docker/agent-exec.ts. */
+  agentExec: AgentExecRunner;
   logger?: FastifyServerOptions['logger'];
   /** Serve the browser dev console at /dev/console (development only). */
   devConsole?: boolean;
@@ -79,7 +82,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     resolveAgent: (workspaceId) => deps.runtime.agentEndpoint(workspaceId),
   });
   await app.register(async (scoped) => {
-    await registerWorkspaceRoutes(scoped, { runtime: deps.runtime, tokens: deps.tokens, apiKey: deps.apiKey });
+    await registerWorkspaceRoutes(scoped, { runtime: deps.runtime, tokens: deps.tokens, apiKey: deps.apiKey, agentExec: deps.agentExec });
   });
   if (deps.devConsole) {
     registerDevConsole(app, { runtime: deps.runtime, tokens: deps.tokens });

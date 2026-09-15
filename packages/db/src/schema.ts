@@ -32,8 +32,25 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   name: text('name').notNull(),
   passwordHash: text('password_hash'),
+  /**
+   * Unix uid this user's agent processes run as inside every workspace container.
+   *
+   * Distinct per user and stable for the user's lifetime, because it is what keeps
+   * one member from reading another's provider credential out of `/proc/<pid>/environ`
+   * and what owns the files an agent writes. Allocated from `notea_agent_uid_seq`
+   * (starts at 20001, well clear of the image's `dev` uid 1000 and of system uids).
+   * See docs/SECURITY_MODEL.md -> Agent identity isolation.
+   */
+  agentUid: integer('agent_uid')
+    .notNull()
+    .unique()
+    .default(sql`nextval('notea_agent_uid_seq')`),
   ...timestamps,
 });
+
+/** Lowest and highest uid the orchestrator will run an agent process as. */
+export const AGENT_UID_MIN = 20_001;
+export const AGENT_UID_MAX = 29_999;
 
 export const workspaceRole = pgEnum('workspace_role', ['owner', 'editor', 'viewer']);
 
@@ -134,7 +151,11 @@ export const taskStatus = pgEnum('task_status', [
   'cancelled',
 ]);
 
-/** Provider API keys, encrypted with AES-256-GCM under CREDENTIALS_KEY (never stored in clear). */
+/**
+ * Per-user provider credentials, encrypted with AES-256-GCM under CREDENTIALS_KEY
+ * (never stored in clear). A credential always belongs to exactly one user and is
+ * only ever injected into that user's own agent processes.
+ */
 export const providerCredentials = pgTable(
   'provider_credentials',
   {
@@ -143,6 +164,16 @@ export const providerCredentials = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     provider: text('provider').notNull(),
+    /**
+     * Which authentication mode the secret is for, and therefore which environment
+     * variable it becomes and who gets billed:
+     *   `subscription` — a Claude subscription token from `claude setup-token`
+     *                    (CLAUDE_CODE_OAUTH_TOKEN); no API billing.
+     *   `api_key`      — a provider API key (ANTHROPIC_API_KEY / OPENAI_API_KEY /
+     *                    GEMINI_API_KEY); pay-as-you-go API billing.
+     * The two are mutually exclusive per run; see packages/agents/src/providers.ts.
+     */
+    authMode: text('auth_mode').notNull().default('api_key'),
     label: text('label').notNull(),
     /** `v1:<iv b64>:<tag b64>:<ciphertext b64>` */
     encryptedSecret: text('encrypted_secret').notNull(),

@@ -10,7 +10,8 @@
     "start": "next start --port 3000",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "create-user": "tsx scripts/create-user.ts"
+    "create-user": "tsx scripts/create-user.ts",
+    "seed:dev": "tsx scripts/seed-dev-users.ts"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.5",

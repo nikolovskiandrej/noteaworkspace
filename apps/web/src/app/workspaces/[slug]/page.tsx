@@ -88,8 +88,8 @@ export default async function WorkspacePage({
             </form>
           )
         ) : null}
-        <Link href="/settings/credentials" className="ml-auto text-xs text-[#6f7782] hover:text-[#c3c8d0]">
-          Credentials
+        <Link href="/settings/ai" className="ml-auto text-xs text-[#6f7782] hover:text-[#c3c8d0]">
+          AI &amp; Claude
         </Link>
         {role === 'owner' ? (
           <form action={deleteWorkspaceAction} className="flex items-center gap-1">
@@ -122,7 +122,7 @@ export default async function WorkspacePage({
           tasks,
           runtimes: runtimeOptions(),
           models: modelOptions(),
-          credentials: credentials.map((c) => ({ id: c.id, provider: c.provider, label: c.label, masked: c.masked })),
+          credentials: credentials.map((c) => ({ id: c.id, provider: c.provider, label: c.label, masked: c.masked, authLabel: c.authLabel, apiBilled: c.apiBilled })),
           policy: { ...DEFAULT_COORDINATION_POLICY, ...(workspace.coordinationPolicy ?? {}) },
           credentialsConfigured: !!rawKey,
         }}

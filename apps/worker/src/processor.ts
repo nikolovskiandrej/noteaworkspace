@@ -3,9 +3,12 @@ import {
   GitWorktrees,
   PerKeyMutex,
   buildTaskBrief,
+  conflictingEnvNames,
   credentialEnv,
   decryptSecret,
   effectiveScope,
+  ensureSharedLayout,
+  findAuthMode,
   integrateTask,
   scopesOverlap,
   taskBranch,
@@ -14,6 +17,7 @@ import {
   type AgentRunContext,
   type AgentRunEvent,
   type AgentRuntime,
+  type AuthMode,
   type ProviderId,
   type RuntimeId,
 } from '@notea/agents';
@@ -23,6 +27,7 @@ import {
   agentRuns,
   agentTasks,
   providerCredentials,
+  users,
   workspaceEvents,
   workspaces,
   type AgentTask,
@@ -32,7 +37,7 @@ import {
 } from '@notea/db';
 import type { ClientIdentity } from '@notea/protocol';
 import { acquireIntegrationLease, releaseIntegrationLease } from './integration-lease';
-import type { ConnectWorkspace } from './workspace-connection';
+import type { ConnectWorkspace, CreateIsolatedSession } from './workspace-connection';
 
 export interface ProcessorLogger {
   info(msg: string, fields?: Record<string, unknown>): void;
@@ -44,6 +49,12 @@ export interface ProcessorDeps {
   db: Database;
   runtimes: Map<RuntimeId, AgentRuntime>;
   connect: ConnectWorkspace;
+  /**
+   * Starts the agent process under the task owner's own Unix uid. Required: a run
+   * whose session cannot be isolated is failed rather than executed as `dev`, because
+   * the shared uid is exactly what lets one member read another's credential.
+   */
+  isolate: CreateIsolatedSession;
   credentialsKey: Buffer | null;
   workerId: string;
   log: ProcessorLogger;
@@ -126,9 +137,17 @@ export async function runTask(deps: ProcessorDeps, task: AgentTask): Promise<voi
   };
 
   try {
+    // The owner's uid is what the agent process runs as; without it there is no
+    // isolation, so the run fails rather than falling back to the shared `dev` user.
+    const owner = await db.query.users.findFirst({ where: eq(users.id, task.createdBy), columns: { id: true, agentUid: true } });
+    if (!owner) throw new Error('the user who created this task no longer exists');
+
     connection = await deps.connect(task.workspaceId, identity);
     const git = new GitWorktrees(connection.runner, DEFAULT_GIT_PATHS);
     await git.ensureRepository();
+    // Makes the repository and Notea's directories writable by the shared group, so
+    // the agent uid can work in its own checkout and `dev` can still integrate it.
+    await ensureSharedLayout(connection.runner, DEFAULT_GIT_PATHS);
     const worktree = await git.createTaskWorktree(task.id, baseBranch);
     await db
       .update(agentTasks)
@@ -152,12 +171,30 @@ export async function runTask(deps: ProcessorDeps, task: AgentTask): Promise<voi
     });
 
     let env: Record<string, string> = {};
+    let authMode: AuthMode | null = null;
     if (task.credentialId) {
       const credential = await db.query.providerCredentials.findFirst({ where: eq(providerCredentials.id, task.credentialId) });
       if (!credential) throw new Error('the selected credential no longer exists');
+      // The control plane already binds a task to one of its creator's own
+      // credentials; re-checking here means a direct database edit, or a bug in that
+      // path, still cannot route one member's key into another member's run.
+      if (credential.userId !== task.createdBy) throw new Error('the selected credential belongs to another user');
       if (!deps.credentialsKey) throw new Error('CREDENTIALS_KEY is not configured on the worker');
-      env = credentialEnv(credential.provider as ProviderId, decryptSecret(credential.encryptedSecret, deps.credentialsKey));
+      const provider = credential.provider as ProviderId;
+      authMode = credential.authMode as AuthMode;
+      if (!findAuthMode(provider, authMode)) throw new Error(`credential has an unsupported authentication mode: ${credential.authMode}`);
+      env = credentialEnv(provider, authMode, decryptSecret(credential.encryptedSecret, deps.credentialsKey));
       await db.update(providerCredentials).set({ lastUsedAt: now() }).where(eq(providerCredentials.id, credential.id));
+      log.info('run credential resolved', {
+        taskId: task.id,
+        runId: run.id,
+        provider,
+        authMode,
+        // Names only. The value never reaches a log, and the other modes' variables
+        // are cleared in the container so the run cannot silently use one of them.
+        env: Object.keys(env),
+        cleared: conflictingEnvNames(provider, authMode),
+      });
     }
 
     const runtime = deps.runtimes.get(task.runtime as RuntimeId);
@@ -175,10 +212,17 @@ export async function runTask(deps: ProcessorDeps, task: AgentTask): Promise<voi
       limits: { maxMinutes: task.maxMinutes, maxBudgetUsd: task.maxBudgetUsd ?? undefined },
       command: task.command ?? undefined,
     };
-    const handle = await runtime.start(ctx, connection.session);
+    const agentSession = deps.isolate(task.workspaceId, owner.agentUid);
+    const handle = await runtime.start(ctx, agentSession);
     await db.update(agentRuns).set({ sessionId: handle.sessionId, heartbeatAt: now() }).where(eq(agentRuns.id, run.id));
-    await recordEvent(db, task.workspaceId, 'task.run_started', { taskId: task.id, runId: run.id, sessionId: handle.sessionId, agentName: task.agentName }, null);
-    log.info('run started', { taskId: task.id, runId: run.id, sessionId: handle.sessionId });
+    await recordEvent(
+      db,
+      task.workspaceId,
+      'task.run_started',
+      { taskId: task.id, runId: run.id, sessionId: handle.sessionId, agentName: task.agentName, agentUid: owner.agentUid, authMode },
+      null,
+    );
+    log.info('run started', { taskId: task.id, runId: run.id, sessionId: handle.sessionId, agentUid: owner.agentUid });
 
     const heartbeat = setInterval(() => {
       void (async () => {

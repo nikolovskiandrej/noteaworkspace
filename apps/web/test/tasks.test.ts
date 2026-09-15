@@ -49,14 +49,23 @@ describeDb('tasks and credentials services', () => {
   });
 
   it('stores credentials encrypted and lists them masked', async () => {
-    const credential = await addCredential(handle.db, ownerId, key, { provider: 'anthropic', label: 'main', secret: 'sk-ant-api03-abcdefghijklmnop' });
+    const credential = await addCredential(handle.db, ownerId, key, {
+      provider: 'anthropic',
+      authMode: 'api_key',
+      label: 'main',
+      secret: 'sk-ant-api03-abcdefghijklmnop',
+    });
     expect(credential.encryptedSecret.startsWith('v1:')).toBe(true);
     expect(credential.encryptedSecret).not.toContain('sk-ant');
     const listed = await listCredentials(handle.db, ownerId, key);
-    expect(listed).toMatchObject([{ label: 'main', provider: 'anthropic', masked: 'sk-ant…mnop' }]);
+    expect(listed).toMatchObject([
+      { label: 'main', provider: 'anthropic', masked: 'sk-ant…mnop', authMode: 'api_key', apiBilled: true, env: 'ANTHROPIC_API_KEY' },
+    ]);
     expect(await listCredentials(handle.db, viewerId, key)).toEqual([]);
     await expect(deleteCredential(handle.db, viewerId, credential.id)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(addCredential(handle.db, ownerId, key, { provider: 'nope', label: 'x', secret: 'sk-1234567890' })).rejects.toThrow(/unknown provider/);
+    await expect(addCredential(handle.db, ownerId, key, { provider: 'nope', authMode: 'api_key', label: 'x', secret: 'sk-1234567890' })).rejects.toThrow(
+      /unknown provider/,
+    );
   });
 
   it('creates tasks with validation and role checks, then walks the transitions', async () => {

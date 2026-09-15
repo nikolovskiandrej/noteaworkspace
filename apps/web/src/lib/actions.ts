@@ -4,6 +4,7 @@ import { AuthError, CredentialsSignin } from 'next-auth';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { auth, signIn, signOut } from '@/auth';
+import { checkCredential } from './ai-status';
 import { addCredential, deleteCredential, requireCredentialsKey } from './credentials';
 import { getDb } from './db';
 import { env } from './env';
@@ -216,19 +217,22 @@ export async function updatePolicyAction(formData: FormData): Promise<void> {
   redirect(returnTo);
 }
 
+const AI_SETTINGS = '/settings/ai';
+
 export async function addCredentialAction(formData: FormData): Promise<void> {
   const userId = await requireUserId();
   try {
     await addCredential(getDb(), userId, requireCredentialsKey(env().CREDENTIALS_KEY), {
       provider: field(formData, 'provider'),
+      authMode: field(formData, 'authMode'),
       label: field(formData, 'label'),
       secret: field(formData, 'secret'),
     });
   } catch (err) {
-    withError('/settings/credentials', err);
+    withError(AI_SETTINGS, err);
   }
-  revalidatePath('/settings/credentials');
-  redirect('/settings/credentials');
+  revalidatePath(AI_SETTINGS);
+  redirect(AI_SETTINGS);
 }
 
 export async function deleteCredentialAction(formData: FormData): Promise<void> {
@@ -236,8 +240,33 @@ export async function deleteCredentialAction(formData: FormData): Promise<void> 
   try {
     await deleteCredential(getDb(), userId, field(formData, 'credentialId'));
   } catch (err) {
-    withError('/settings/credentials', err);
+    withError(AI_SETTINGS, err);
   }
-  revalidatePath('/settings/credentials');
-  redirect('/settings/credentials');
+  revalidatePath(AI_SETTINGS);
+  redirect(AI_SETTINGS);
+}
+
+/**
+ * Asks the vendor CLI, inside a container and under this user's own uid, how it
+ * authenticated. The result is a status line, never the secret.
+ */
+export async function checkCredentialAction(formData: FormData): Promise<void> {
+  const userId = await requireUserId();
+  let query: string;
+  try {
+    const check = await checkCredential(
+      { db: getDb(), orchestrator: getOrchestrator(), credentialsKey: requireCredentialsKey(env().CREDENTIALS_KEY) },
+      userId,
+      { credentialId: field(formData, 'credentialId'), workspaceId: field(formData, 'workspaceId') },
+    );
+    const params = new URLSearchParams({
+      checked: `${check.ok ? 'Connected' : 'Not usable'}: ${check.summary}. Checked as uid ${String(check.uid)}${check.configDirectory ? `, config in ${check.configDirectory}` : ''}.`,
+      ok: check.ok ? '1' : '0',
+    });
+    query = params.toString();
+  } catch (err) {
+    withError(AI_SETTINGS, err);
+  }
+  revalidatePath(AI_SETTINGS);
+  redirect(`${AI_SETTINGS}?${query}`);
 }

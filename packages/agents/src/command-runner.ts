@@ -11,16 +11,25 @@ export class CommandError extends Error {
   }
 }
 
-/** Runs commands through a workspace connection (protocol exec). */
+/**
+ * Runs commands through a workspace connection (protocol exec), as the container's
+ * `dev` user.
+ *
+ * `prefix` exists for the umask. The project is shared between `dev` and the
+ * per-member agent uids through the `dev` group, so anything `dev` creates in a
+ * worktree (`git worktree add`, a rebase) has to stay group-writable or the agent
+ * that owns the run could not edit its own checkout. Default umask 022 would make
+ * those files read-only to the group.
+ */
 export class WorkspaceCommandRunner implements CommandRunner {
   constructor(
     private readonly client: WorkspaceClient,
-    private readonly defaults: { timeoutMs?: number; env?: Record<string, string> } = {},
+    private readonly defaults: { timeoutMs?: number; env?: Record<string, string>; prefix?: string } = {},
   ) {}
 
   async run(command: string, options: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {}): Promise<ExecOutcome> {
     const result = await this.client.runExec({
-      command,
+      command: this.defaults.prefix ? `${this.defaults.prefix}${command}` : command,
       shell: true,
       cwd: options.cwd,
       env: { ...(this.defaults.env ?? {}), ...(options.env ?? {}) },

@@ -6,7 +6,7 @@ import { OrchestratorClient } from '@notea/workspace-client';
 import { loadConfig } from './config';
 import { RunSlots, findApprovedTasks, integrateApprovedTask, recoverStaleRuns, runTask, startDueRuns, type ProcessorDeps } from './processor';
 import { reapAll } from './reaper';
-import { createWorkspaceConnector } from './workspace-connection';
+import { createIsolatedSessionFactory, createWorkspaceConnector } from './workspace-connection';
 
 for (const candidate of [path.resolve(process.cwd(), '.env'), path.resolve(process.cwd(), '../../.env')]) {
   if (existsSync(candidate)) {
@@ -38,6 +38,7 @@ async function main(): Promise<void> {
     db: handle.db,
     runtimes: createRuntimeRegistry(),
     connect: createWorkspaceConnector(orchestrator),
+    isolate: createIsolatedSessionFactory(orchestrator),
     credentialsKey: config.CREDENTIALS_KEY ? parseCredentialsKey(config.CREDENTIALS_KEY) : null,
     workerId: config.WORKER_ID,
     log,

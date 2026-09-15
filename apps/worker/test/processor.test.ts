@@ -96,6 +96,7 @@ describeDb('task processor', () => {
     db: handle.db,
     runtimes: new Map([[runtime.id, runtime]]),
     connect: async () => ({ session: fakeSession(), runner, close: () => undefined }),
+    isolate: () => fakeSession(),
     credentialsKey: null,
     workerId: 'test-worker',
     log,

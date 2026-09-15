@@ -1,5 +1,16 @@
 export * from './types';
-export { PROVIDERS, credentialEnv, findModel, getProvider } from './providers';
+export {
+  AUTH_MODES,
+  PROVIDERS,
+  allCredentialEnvNames,
+  authModesFor,
+  conflictingEnvNames,
+  credentialEnv,
+  findAuthMode,
+  findModel,
+  getProvider,
+  isApiBilled,
+} from './providers';
 export {
   CommandError,
   ScriptedCommandRunner,
@@ -20,7 +31,17 @@ export {
   type GitPaths,
   type WorktreeEntry,
 } from './git';
-export { DEFAULT_RUNS_DIR, runBriefPath, runDirectory } from './layout';
+export {
+  AGENT_GIT_ENV,
+  DEFAULT_AGENTS_DIR,
+  DEFAULT_NOTEA_DIR,
+  DEFAULT_RUNS_DIR,
+  SHARED_LAYOUT_MARKER,
+  ensureSharedLayout,
+  runBriefPath,
+  runDirectory,
+  sharedLayoutScript,
+} from './layout';
 export { PerKeyMutex, integrateTask, type IntegrationInput, type IntegrationResult } from './integration';
 export {
   ACTIVE_TASK_STATUSES,
@@ -42,4 +63,16 @@ export { CodexRuntime, parseCodexLine } from './runtimes/codex';
 export { GeminiRuntime } from './runtimes/gemini';
 export { createRuntimeRegistry } from './runtimes/index';
 export { ClientWorkspaceSession } from './workspace-session';
+export {
+  IsolatedAgentSession,
+  type AgentExecTransport,
+  type IsolatedAgentSessionOptions,
+} from './isolated-session';
 export { decryptSecret, encryptSecret, maskSecret, parseCredentialsKey } from './credentials';
+export {
+  CLAUDE_AUTH_STATUS_COMMAND,
+  authModeOfMethod,
+  describeAuthStatus,
+  parseClaudeAuthStatus,
+  type ClaudeAuthStatus,
+} from './auth-status';

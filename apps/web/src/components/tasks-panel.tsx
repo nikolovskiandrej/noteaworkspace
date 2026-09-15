@@ -32,7 +32,7 @@ export interface TasksPanelProps {
   tasks: TaskListItem[];
   runtimes: Array<{ id: string; label: string; provider: string | null }>;
   models: Array<{ provider: string; modelId: string; label: string }>;
-  credentials: Array<{ id: string; provider: string; label: string; masked: string }>;
+  credentials: Array<{ id: string; provider: string; label: string; masked: string; authLabel: string; apiBilled: boolean }>;
   policy: { overlap: string; integration: string; checkCommand: string | null; baseBranch: string };
   credentialsConfigured: boolean;
 }
@@ -168,16 +168,17 @@ export function TasksPanel({ workspaceId, role, returnTo, tasks, runtimes, model
                 </select>
               </label>
               <label className="block">
-                <span className="text-[#9aa1ab]">Credential</span>
+                <span className="text-[#9aa1ab]">Your AI connection</span>
                 <select name="credentialId" defaultValue="" className="mt-0.5 w-full rounded border border-[#2b313b] bg-[#0e1014] px-2 py-1">
-                  <option value="">none (CLI login inside the workspace)</option>
+                  <option value="">none (the CLI login in your own agent home)</option>
+                  {/* The billing mode is on the option itself: choosing a connection is choosing who pays. */}
                   {compatibleCredentials.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.label} ({c.masked})
+                      {c.label} — {c.authLabel} ({c.apiBilled ? 'API billing' : 'no API charges'})
                     </option>
                   ))}
                 </select>
-                {!credentialsConfigured ? <span className="text-[10px] text-[#6f7782]">Set CREDENTIALS_KEY to store API keys under Settings.</span> : null}
+                {!credentialsConfigured ? <span className="text-[10px] text-[#6f7782]">Set CREDENTIALS_KEY to store connections under Settings.</span> : null}
               </label>
             </>
           )}

@@ -1,4 +1,7 @@
 import type {
+  AgentExecFrame,
+  AgentExecRequest,
+  AgentExecResult,
   CreateWorkspaceRuntimeRequest,
   IssueConnectTokenRequest,
   IssueConnectTokenResponse,
@@ -66,6 +69,59 @@ export class OrchestratorClient {
     return this.call('POST', '/connect-tokens', request);
   }
 
+  /** Runs a command in a workspace container as `request.uid` and buffers its output. */
+  agentExec(workspaceId: string, request: AgentExecRequest): Promise<AgentExecResult> {
+    return this.call('POST', `/workspaces/${encodeURIComponent(workspaceId)}/agent-exec`, { ...request, stream: false });
+  }
+
+  /**
+   * Starts a command in a workspace container as `request.uid` and streams its
+   * output as it arrives. The returned `frames` always ends with an `exit` frame
+   * (or with the stream closing), so a consumer's `for await` cannot hang forever.
+   */
+  async agentExecStream(
+    workspaceId: string,
+    request: AgentExecRequest,
+  ): Promise<{ execId: string; frames: AsyncIterable<AgentExecFrame>; kill: () => Promise<void> }> {
+    const fetchImpl = this.opts.fetchImpl ?? fetch;
+    const response = await fetchImpl(`${this.baseUrl}/workspaces/${encodeURIComponent(workspaceId)}/agent-exec`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.opts.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...request, stream: true }),
+    }).catch((err: unknown) => {
+      throw new OrchestratorError(503, 'unreachable', `orchestrator unreachable: ${(err as Error).message}`);
+    });
+    if (!response.ok || !response.body) {
+      const text = await response.text().catch(() => '');
+      let message = `orchestrator returned ${response.status}`;
+      let code = 'error';
+      try {
+        const error = (JSON.parse(text) as { error?: { code?: string; message?: string } }).error;
+        if (error?.message) message = error.message;
+        if (error?.code) code = error.code;
+      } catch {
+        /* keep the default message */
+      }
+      throw new OrchestratorError(response.status, code, message);
+    }
+
+    const iterator = readFrames(response.body);
+    const first = await iterator.next();
+    if (first.done || first.value.type !== 'started') {
+      throw new OrchestratorError(502, 'bad_stream', 'agent exec did not start');
+    }
+    const execId = first.value.execId;
+    return {
+      execId,
+      frames: { [Symbol.asyncIterator]: () => iterator },
+      kill: async () => {
+        await this.call('POST', `/workspaces/${encodeURIComponent(workspaceId)}/agent-exec/${encodeURIComponent(execId)}/kill`, {
+          uid: request.uid,
+        });
+      },
+    };
+  }
+
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
     const fetchImpl = this.opts.fetchImpl ?? fetch;
     let response: Response;
@@ -95,5 +151,42 @@ export class OrchestratorClient {
       throw new OrchestratorError(response.status, error?.code ?? 'error', error?.message ?? `orchestrator returned ${response.status}`);
     }
     return json as T;
+  }
+}
+
+/** Splits an NDJSON body into frames, ignoring blank and unparsable lines. */
+async function* readFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<AgentExecFrame, void, undefined> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let index = buffer.indexOf('\n');
+      while (index !== -1) {
+        const line = buffer.slice(0, index).trim();
+        buffer = buffer.slice(index + 1);
+        if (line) {
+          try {
+            yield JSON.parse(line) as AgentExecFrame;
+          } catch {
+            /* a partial or malformed frame is not worth failing the run over */
+          }
+        }
+        index = buffer.indexOf('\n');
+      }
+    }
+    const tail = buffer.trim();
+    if (tail) {
+      try {
+        yield JSON.parse(tail) as AgentExecFrame;
+      } catch {
+        /* ignore */
+      }
+    }
+  } finally {
+    reader.releaseLock();
   }
 }

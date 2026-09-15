@@ -4,6 +4,7 @@ import Docker from 'dockerode';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app';
 import { loadConfig } from './config';
+import { DockerAgentExec } from './docker/agent-exec';
 import { WorkspaceRuntime } from './docker/workspace-runtime';
 import { TokenService } from './tokens';
 
@@ -44,6 +45,11 @@ async function main(): Promise<void> {
     runtime,
     tokens,
     apiKey: config.apiKey,
+    agentExec: new DockerAgentExec(docker, {
+      uidMin: config.agentUidRange.min,
+      uidMax: config.agentUidRange.max,
+      gid: config.agentUidRange.gid,
+    }),
     logger: { level: config.logLevel },
     devConsole: config.devConsole,
   });
