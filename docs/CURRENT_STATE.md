@@ -35,7 +35,7 @@ notea-workspace/
 | Check | Result |
 |---|---|
 | `npm run typecheck` | OK across all 9 workspaces |
-| `npm test` (no `DATABASE_URL`) | OK, exit 0: agents 28 · protocol 6 · workspace-agent 42 · workspace-client 6 · orchestrator 21 (+1 e2e skipped) · web 13 (+7 skipped) · db and worker skip themselves |
+| `npm test` (no `DATABASE_URL`) | OK, exit 0: agents 31 · protocol 6 · workspace-agent 42 · workspace-client 6 · orchestrator 21 (+1 e2e skipped) · web 13 (+7 skipped) · db and worker skip themselves |
 | `npm test` for `@notea/db` and `@notea/worker` with `DATABASE_URL` | OK: db 1 · worker 17 (task lifecycle, cancellation, stale-run recovery, concurrency limit, integration lease, and the worktree/branch reaper — planner, git collection, execution and the DB-gated skip/reap paths). Run against a throw-away database (`CREATE DATABASE notea_test`), because the worker suite deletes tasks in `beforeEach`. |
 | Reaper (real, in Docker) | OK: run against the demo workspace's live container, it deleted exactly the one merged `done` branch (`notea/task/7c7b3512…`), left the three failed worktrees and branches and `main` untouched, produced a sane `git worktree list`, and a second run was a no-op. |
 | `npm run test:e2e -w @notea/orchestrator` (`NOTEA_E2E_DOCKER=1`) | OK: 18 tests — container create → terminal I/O → exec with injected env → file persistence across restart → cleanup |

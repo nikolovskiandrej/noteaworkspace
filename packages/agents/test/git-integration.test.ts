@@ -1,9 +1,53 @@
 import { describe, expect, it } from 'vitest';
 import { ScriptedCommandRunner } from '../src/command-runner';
-import { GitWorktrees, taskBranch, taskWorktreePath } from '../src/git';
+import { GitWorktrees, TASK_ID_PATTERN, parseWorktreeList, taskBranch, taskIdOfBranch, taskIdOfWorktreePath, taskWorktreePath } from '../src/git';
 import { PerKeyMutex, integrateTask } from '../src/integration';
 
 const paths = { projectDir: '/home/dev/project', worktreesDir: '/home/dev/.notea/worktrees' };
+const UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+describe('worktree/branch parsing (reaper safety guards)', () => {
+  it('parses `git worktree list --porcelain`, including flags', () => {
+    const output = [
+      '/home/dev/project',
+      'worktree /home/dev/project',
+      'HEAD 7c8a81ec',
+      'branch refs/heads/main',
+      '',
+      `worktree /home/dev/.notea/worktrees/${UUID}`,
+      'HEAD 418116b8',
+      `branch refs/heads/notea/task/${UUID}`,
+      'locked',
+      '',
+      'worktree /home/dev/.notea/worktrees/gone',
+      'HEAD deadbeef',
+      'detached',
+      'prunable gitdir file points to non-existent location',
+      '',
+    ].join('\n');
+    const entries = parseWorktreeList(output);
+    expect(entries).toHaveLength(3);
+    expect(entries[0]).toMatchObject({ path: '/home/dev/project', branch: 'refs/heads/main', detached: false });
+    expect(entries[1]).toMatchObject({ path: `/home/dev/.notea/worktrees/${UUID}`, branch: `refs/heads/notea/task/${UUID}`, locked: true });
+    expect(entries[2]).toMatchObject({ path: '/home/dev/.notea/worktrees/gone', detached: true, prunable: true });
+  });
+
+  it('extracts a task id from a task branch and rejects anything else', () => {
+    expect(taskIdOfBranch(`notea/task/${UUID}`)).toBe(UUID);
+    expect(taskIdOfBranch('main')).toBeNull();
+    expect(taskIdOfBranch('notea/task/not-a-uuid')).toBeNull();
+    expect(taskIdOfBranch('feature/notea/task/' + UUID)).toBeNull();
+  });
+
+  it('extracts a task id from a worktree path and rejects escapes', () => {
+    expect(taskIdOfWorktreePath(paths, `/home/dev/.notea/worktrees/${UUID}`)).toBe(UUID);
+    expect(taskIdOfWorktreePath(paths, `/home/dev/.notea/worktrees/${UUID}/nested`)).toBeNull();
+    expect(taskIdOfWorktreePath(paths, '/home/dev/project')).toBeNull();
+    expect(taskIdOfWorktreePath(paths, '/home/dev/.notea/worktrees/not-a-uuid')).toBeNull();
+    expect(TASK_ID_PATTERN.test(UUID)).toBe(true);
+    expect(TASK_ID_PATTERN.test('../etc')).toBe(false);
+  });
+});
 
 describe('GitWorktrees', () => {
   it('initialises a repository when the project is not one yet', async () => {

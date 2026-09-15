@@ -28,7 +28,7 @@ Node 24, TypeScript 5.9, npm workspaces, zod 4, ws 8, node-pty 1.1, Fastify 5, d
 
 ## 6. Implemented and tested
 
-Everything listed under "Implemented behaviour" in `CURRENT_STATE.md`: protocol 1.1, agent daemon, orchestrator (incl. image-upgrade recreation), control plane with auth/roles/workspaces/members/terminal/editor/tasks/credentials, agents package, worker (incl. the worktree/branch reaper). 142 unit/integration tests + Docker e2e + manual browser verification of both the workspace UI and the complete task pipeline.
+Everything listed under "Implemented behaviour" in `CURRENT_STATE.md`: protocol 1.1, agent daemon, orchestrator (incl. image-upgrade recreation), control plane with auth/roles/workspaces/members/terminal/editor/tasks/credentials, agents package, worker (incl. the worktree/branch reaper). 145 unit/integration tests + Docker e2e + manual browser verification of both the workspace UI and the complete task pipeline.
 
 ## 7. Partially implemented
 
@@ -80,7 +80,7 @@ Not tested: an **authenticated** agent run of any provider — the one real gap;
 
 ## 23. Exact current state (session 5)
 
-**A worker-side worktree/branch reaper was added, and the agent package's git layer was cleaned up.** `apps/worker/src/reaper.ts` runs on the worker tick (`WORKER_REAP_INTERVAL_MS`, default 60 s): it removes the worktree and branch of a deleted task (archiving the branch tip to `refs/notea/archive/<id>` first) and the merged branch of an integrated task, keeps re-runnable and active tasks, in-use worktrees and `main`, scans only running containers, and skips a workspace while any task there is active (D-038). Verified against the demo container: it reaped exactly the one leftover `done` branch and was idempotent. `GitWorktrees` gained the read/query/delete helpers this needs, `removeTaskWorktree` is now single-purpose, and `packages/agents/src/layout.ts` centralises run-artefact paths (the four runtimes use `runBriefPath` instead of hardcoding). Suite: worker 8 → 17, total 133 → 142, all green; typecheck and `next build` clean.
+**A worker-side worktree/branch reaper was added, and the agent package's git layer was cleaned up.** `apps/worker/src/reaper.ts` runs on the worker tick (`WORKER_REAP_INTERVAL_MS`, default 60 s): it removes the worktree and branch of a deleted task (archiving the branch tip to `refs/notea/archive/<id>` first) and the merged branch of an integrated task, keeps re-runnable and active tasks, in-use worktrees and `main`, scans only running containers, and skips a workspace while any task there is active (D-038). Verified against the demo container: it reaped exactly the one leftover `done` branch and was idempotent. `GitWorktrees` gained the read/query/delete helpers this needs, `removeTaskWorktree` is now single-purpose, and `packages/agents/src/layout.ts` centralises run-artefact paths (the four runtimes use `runBriefPath` instead of hardcoding). Suite: agents 28 → 31 (git parser guards), worker 8 → 17, total 133 → 145, all green; typecheck and `next build` clean.
 
 This built on an incomplete, uncommitted refactor of `git.ts` (the reaper helper toolkit) plus `layout.ts` found in the working tree at session start; that work was adopted and finished rather than discarded, and `processor.ts` was updated to the new single-arg `removeTaskWorktree`.
 
