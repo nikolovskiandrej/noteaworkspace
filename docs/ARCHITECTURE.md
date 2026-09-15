@@ -1,156 +1,114 @@
 # Notea Workspace — Architecture
 
-Last updated: 2026-09-15. Status words as defined in `PROJECT_SPEC.md`.
+Last updated: 2026-09-15 (session 2). Status words as defined in `PROJECT_SPEC.md`.
 
 ## 1. Overview
 
 ```
-                      browser (human)                    agent runner (later)
-                            │  wss  (one socket per tab)        │
-                            ▼                                   ▼
-┌───────────────────────────────────────────────────────────────────────────────┐
-│ CONTROL PLANE  apps/web  (Next.js 16)                          [planned]      │
-│   auth · users · workspaces · memberships · tasks · activity · UI             │
-│   Postgres via Drizzle (packages/db)                                          │
-└───────────────┬───────────────────────────────────────────────┬───────────────┘
-                │ REST + API key (server to server)             │ browser opens
-                ▼                                               │ /ws/workspaces/:id?token=…
-┌───────────────────────────────────────────────────────────────▼───────────────┐
-│ RUNTIME PLANE  apps/orchestrator (Fastify, dockerode)          [implemented]  │
-│   POST /workspaces · start · stop · delete · POST /connect-tokens             │
-│   WebSocket bridge: verify JWT → identify frame → byte pipe                   │
-└───────────────┬───────────────────────────────────────────────────────────────┘
-                │ Docker API (unix socket / npipe)
+   browser (human)                                   worker (agent runner)
+        │ wss + connect JWT                                │ wss + connect JWT (kind: agent)
+        ▼                                                  │
+┌──────────────────────────────────────────┐               │
+│ CONTROL PLANE  apps/web  (Next.js 16)    │   Postgres    │   apps/worker
+│  Auth.js · workspaces · members · roles  │◄────────────► │   polls agent_tasks, claims, runs,
+│  tasks · policy · credentials · UI       │  (packages/db)│   integrates approved tasks
+└───────────────┬──────────────────────────┘               │
+                │ REST + API key                           │ REST + API key (start, tokens)
+                ▼                                          ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ RUNTIME PLANE  apps/orchestrator (Fastify, dockerode)                          │
+│  create/start/stop/delete · recreate on image change · connect tokens          │
+│  WebSocket bridge: verify JWT → identify frame → byte pipe                     │
+└───────────────┬──────────────────────────────────────────────────────────────┘
+                │ Docker API
                 ▼
-┌───────────────────────────────────────────────────────────────────────────────┐
-│ WORKSPACE CONTAINER  notea-ws-<id>   image notea/workspace:dev [implemented]  │
-│   user dev (uid 1000), cap-drop ALL, no-new-privileges, cpu/mem/pids limits   │
-│   volume notea-ws-<id>-home → /home/dev  (project at /home/dev/project)       │
-│   ┌────────────────────────────────────────────────────────┐                  │
-│   │ workspace agent  :7070   packages/workspace-agent      │                  │
-│   │  PTY sessions (node-pty) · scrollback · multi-attach   │                  │
-│   │  file list/read/write (etag) · presence · roles        │                  │
-│   └────────────────────────────────────────────────────────┘                  │
-│   shells · dev servers · AI agent CLIs (later) · git worktrees (later)        │
-└───────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ WORKSPACE CONTAINER  notea-ws-<id>   image notea/workspace:dev                 │
+│  user dev · cap-drop ALL · no-new-privileges · cpu/mem/pids limits             │
+│  volume notea-ws-<id>-home → /home/dev   (project at /home/dev/project,        │
+│  task worktrees at /home/dev/.notea/worktrees/<taskId>, run briefs under .notea/runs)│
+│  ┌──────────────────────────────────────────────────────────┐                  │
+│  │ workspace agent :7070  (packages/workspace-agent)         │                  │
+│  │  PTY sessions · exec processes · files · presence · roles │                  │
+│  └──────────────────────────────────────────────────────────┘                  │
+│  shells · dev servers · claude / codex / gemini CLIs · git                      │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Shared contract for every arrow that carries workspace traffic: `packages/protocol` (implemented, tested).
+Shared contracts: `packages/protocol` (workspace protocol v1.1 + orchestrator API types), `packages/workspace-client` (protocol client + OrchestratorClient), `packages/agents` (runtimes, git, integration, tasks).
 
 ## 2. Components
 
 | Component | Path | Responsibility | Status |
 |---|---|---|---|
-| Protocol | `packages/protocol` | Zod schemas + TS types for client→agent messages, agent→client events, orchestrator REST types, close codes. Protocol version 1. | implemented, tested |
-| Workspace agent | `packages/workspace-agent` | In-container daemon: PTY session manager, scrollback, multi-client attach, role checks, file service, presence, health endpoint, token-gated WebSocket. Bundled to a single CJS file with esbuild. | implemented, tested (unit + in-process integration) |
-| Base image | `infra/workspace-image` | Debian bookworm + Node 24 + git + build tools + ripgrep; agent under `/opt/notea/agent`; user `dev`; health check. | implemented (built locally; see CURRENT_STATE) |
-| Orchestrator | `apps/orchestrator` | Container/volume/network lifecycle via dockerode; hardened container spec; connect-token issuing/verification; WebSocket bridge; REST API guarded by API key. | implemented, tested (unit + in-process bridge test + gated Docker e2e) |
-| Control plane | `apps/web` | Next.js app: auth, workspace CRUD, membership, terminal UI (xterm.js), file tree/editor, later tasks and activity. | planned (M1) |
-| Database | `packages/db` | Drizzle schema + migrations for Postgres. | designed (`DATABASE_SCHEMA.md`) |
-| Agent layer | `packages/agents` (proposed) | Provider adapters, agent runtimes, task briefs, coordinator. | designed (`AGENT_SYSTEM.md`) |
+| Protocol | `packages/protocol` | Zod schemas/types: identify, terminals (with env), files (`fs.changed`), exec, presence, errors, close codes; orchestrator REST types. v1.1. | implemented, tested |
+| Workspace agent | `packages/workspace-agent` | In-container daemon: `SessionManager` (PTY, scrollback, multi-attach), `ProcessManager` (exec: streamed output, limits, timeouts, kill on disconnect), `FsService` (path-confined, etag), `AgentHub` (routing, roles, presence), token-gated WebSocket server. Bundled with esbuild. | implemented, tested |
+| Base image | `infra/workspace-image` | Debian + Node 24 + git + build tools + ripgrep + Claude Code / Codex / Gemini CLIs + the agent; user `dev`; health check. | implemented |
+| Orchestrator | `apps/orchestrator` | Container/volume/network lifecycle, hardened spec, image-change recreation on start, connect tokens (JWT) and agent tokens (HMAC), API-key REST, WebSocket bridge, optional dev console. | implemented, tested (+ Docker e2e) |
+| Workspace client | `packages/workspace-client` | `WorkspaceClient` (request/reply, events, reconnect with token refresh, `runExec`), `OrchestratorClient`. Works in browsers and Node. | implemented, tested |
+| Database | `packages/db` | Drizzle schema, migrations, client, migrate script. | implemented, tested |
+| Control plane | `apps/web` | Next.js 16 App Router: Auth.js credentials, server-side authorization, workspaces/members, terminal/editor/file tree/presence UI, tasks panel, policy, credentials settings. | implemented, tested, verified in Chrome |
+| Agents | `packages/agents` | Provider catalog, `AgentRuntime` interface, Claude Code headless runtime, generic CLI runtimes, `CommandRunner`, `GitWorktrees`, `integrateTask`, task transitions, scope overlap, brief builder, credential crypto. | implemented, tested |
+| Worker | `apps/worker` | Long-lived process: claims queued tasks, runs them in worktrees through the bridge as an agent participant, persists events, commits, moves to review; integrates approved tasks; recovers stale runs. | implemented, tested, verified in Docker |
 
 ## 3. Key flows
 
-### 3.1 Create and enter a workspace (M0 path, implemented at the API level)
+### 3.1 Create and enter a workspace (implemented)
+1. Web inserts `workspaces` + owner membership + event, calls `POST /workspaces {workspaceId, wait:true}`.
+2. Orchestrator creates volume + hardened container, starts it, waits for the agent's `/healthz`.
+3. Browser calls `POST /api/workspaces/:id/connect-token` (membership checked) → web asks the orchestrator for a JWT → browser opens the bridge WebSocket. `WorkspaceClient` re-requests a token on every reconnect.
+4. Agent answers `hello`; the UI attaches to existing sessions or creates one; the file tree lists the project; the editor reads/writes with etags.
 
-1. Control plane inserts a `workspaces` row (M1) and calls `POST /workspaces {workspaceId}` on the orchestrator with the API key.
-2. Orchestrator ensures the `notea-workspaces` bridge network, creates volume `notea-ws-<id>-home`, builds the hardened container spec (`src/docker/spec.ts`), creates and starts the container, then polls the agent's `/healthz` until it answers.
-3. Browser asks the control plane to open the workspace; the control plane calls `POST /connect-tokens {workspaceId, userId, name, role}` and hands the browser a 5-minute JWT plus the WebSocket path.
-4. Browser opens `wss://…/ws/workspaces/<id>?token=…`. The orchestrator verifies the JWT (issuer, audience, expiry, workspace match), resolves the agent endpoint, opens an upstream WebSocket to the agent with the per-workspace agent token, sends one `identify` frame, then pipes bytes both ways.
-5. The agent answers `hello` (protocol version, existing sessions, presence). The browser sends `term.create`; output streams as `term.output`.
+### 3.2 Collaboration (implemented parts)
+Members with roles; viewers cannot type, resize, write or run. Presence lists connected humans and agents and which sessions they watch. `fs.changed` (API writes) shows a "changed on disk" banner in other editors. Terminal tabs show agent sessions with a badge.
 
-### 3.2 Reconnect
+### 3.3 Agent task (implemented, verified with the generic runtime)
+1. Editor/owner creates a task (title, description, runtime, model, credential, scope) → status `queued`, event recorded.
+2. Worker claims the oldest queued task whose scope does not overlap a running task (policy `block`).
+3. Worker connects to the workspace as `kind: "agent"` (name = agent name), ensures the project is a git repo, creates worktree `/home/dev/.notea/worktrees/<taskId>` on branch `notea/task/<taskId>` from the base branch.
+4. Brief written to `/home/dev/.notea/runs/<runId>/brief.md`; credential decrypted and injected into the session env only; runtime starts a terminal session running the CLI (visible to everyone).
+5. Events (`started`, `message`, `tool_call`, `file_changed`, `usage`, `log`, `finished`) are persisted to `agent_run_events`; the worker heartbeats and honours cancellation.
+6. On exit: leftover changes are committed as the agent; diff stat stored; task → `needs_review` (or `approved` with policy `integration: auto`).
+7. Human approves → worker (one at a time per workspace) rebases the task branch onto the base branch, runs the policy's check command in the worktree, fast-forwards the base branch in the main tree, removes the worktree → `done`. Conflicts → `needs_rebase`; failing checks → `checks_failed`; both can be re-run.
 
-Sessions live in the agent, not in the connection. A browser that reconnects sends `term.attach {sessionId}` and receives the scrollback buffer (last 256 KB of raw output by default) followed by live output. Orchestrator restarts do not kill sessions. Container restarts do (sessions are process state; files persist on the volume).
-
-### 3.3 Two humans (M3; agent side implemented)
-
-Both connect with their own connect tokens. The agent broadcasts `presence` (who is connected, which sessions each is attached to) and `term.opened` / `term.exit` to everyone; output only goes to attached clients. Roles are enforced in the agent per message (`viewer` cannot type, resize, create, kill, or write files).
-
-### 3.4 An AI agent runs a task (M4/M5; designed)
-
-See `AGENT_SYSTEM.md`. In short: the control plane creates a task and a worktree, mints a connect token with `kind: "agent"`, and an agent runner (a process next to the orchestrator, or later inside the container) creates a tagged terminal session that runs the agent CLI in the worktree. Everyone can watch it. Completion posts a branch to the integration queue.
+### 3.4 Image upgrade (implemented)
+`npm run build:image` then stop/start a workspace: the orchestrator sees the tag now points at a different image id and recreates the container on the same volume before starting it.
 
 ## 4. Runtime model
+Unchanged from session 1: one container + one HOME volume per workspace, Docker as source of truth, labels for discovery, `published`/`network` connect modes, default limits 2 CPU / 4 GB / 2048 pids. New: recreation on image change; exec processes killed when their connection closes.
 
-- **One container per workspace**, image `notea/workspace:dev` by default (per-project images later). Name `notea-ws-<workspaceId>`, labels `notea.managed=true`, `notea.workspace.id=<id>`, `notea.image=<image>`.
-- **One named volume per workspace** mounted at `/home/dev`. HOME persists shell history, npm caches, `~/.claude`/tool logins and the project at `/home/dev/project`. The container filesystem is disposable.
-- **Docker is the source of truth for runtime state.** The orchestrator caches nothing; `inspect` maps Docker states to `creating | starting | running | stopping | stopped | error | unknown`. Restart policy `unless-stopped` means workspaces come back after a host reboot without orchestrator involvement.
-- **Resource limits** per container: default 2 CPUs, 4096 MB RAM (no swap), 2048 pids, 256 MB `/dev/shm`. Overridable per workspace at creation.
-- **Networking:** containers sit on the `notea-workspaces` bridge network and have internet egress (needed for git, npm, model APIs). The agent port 7070 is reachable in one of two ways (`AGENT_CONNECT_MODE`): `network` (orchestrator on Linux connects to the container IP) or `published` (agent port published on `127.0.0.1:<random>`; required with Docker Desktop on Windows/macOS where container IPs are not routable from the host). `auto` picks by platform.
-- **Workspace id** is a slug/UUID matching `[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}`; the control plane chooses it.
+## 5. Terminal and exec
+Terminals: node-pty, multi-attach, 256 KB scrollback replay, last-writer-wins resize, SIGHUP→SIGKILL kill, per-session env injection (allow-listed names). Exec: `child_process.spawn` (optionally via `bash -lc`), stdout/stderr streamed to the owner only, 8 MB output cap, 10 min default / 60 min max timeout, ≤16 concurrent, cwd anywhere in the container. Rule: long/watchable work → terminal session; short commands (git, checks) → exec.
 
-## 5. Terminal architecture
+## 6. Realtime
+One WebSocket per tab or per worker connection; orchestrator is a pure pipe after verification; identify-first; JSON frames; presence derived from live connections; control-plane data (tasks, activity) is server-rendered and refreshed every 5 s while tasks are active.
 
-- The agent spawns PTYs with node-pty (`xterm-256color`, login shell `/bin/bash -l`, cwd `/home/dev/project`, environment inherited minus `NOTEA_AGENT_TOKEN`).
-- `SessionManager` owns sessions: create, attach/detach (many clients per session), input, resize (last writer wins), kill (SIGHUP then SIGKILL after 5 s), list. Max 32 sessions per workspace by default.
-- A `ScrollbackBuffer` per session keeps the last N bytes (256 KB) of raw output and is replayed on attach. Raw replay reproduces the screen well enough for shells and most TUIs; a headless terminal emulator serialising exact screen state is a documented improvement (D-021).
-- Browser side (M1): xterm.js 6 with fit + WebGL addons; one `WebSocket` per tab multiplexes all terminals by `sessionId`.
-- The PTY abstraction (`src/pty.ts`) is injectable, so the session manager and hub are unit-tested with a fake PTY on Windows; the real PTY is exercised only inside Linux containers (Docker e2e test).
-
-## 6. Realtime architecture
-
-- Transport: WebSocket, JSON text frames, discriminated by `type`. Requests carry `reqId`; replies echo it; events do not have one.
-- **Orchestrator is a pure pipe.** After JWT verification it does not parse traffic. Its only originated frame is `identify`; the agent honours `identify` only as the first frame of a connection, so a browser cannot re-identify (tested in `bridge.test.ts`).
-- Client→agent frames are validated with zod in the agent (`parseClientMessage`); invalid frames on an identified connection yield an `error` message, not a disconnect.
-- Presence is derived from live connections; there is no presence state to reconcile.
-- Planned additions (M3): `fs.changed` events from a watcher (with ignore rules for `node_modules`, `.git`), typing/cursor presence for the editor, and control-plane events (workspace list, task status) over a separate lightweight channel (SSE) from `apps/web`.
-
-## 7. Control plane (planned, M1)
-
-- **Next.js 16 (App Router), TypeScript, Tailwind 4.** Server components for pages; route handlers for the small internal API; server actions for mutations.
-- **Auth.js v5** with a Credentials provider (email + argon2 password) and JWT sessions; OAuth providers can be added by configuration later. Users are seeded with a CLI script for personal use.
-- **Postgres + Drizzle** (`DATABASE_SCHEMA.md`).
-- **Orchestrator client**: a thin typed client over the REST API using `ORCHESTRATOR_URL` and `ORCHESTRATOR_API_KEY`. The browser never talks to the orchestrator's REST API, only to its WebSocket endpoint with a connect token.
-- Pages: sign in, workspace list, workspace view (terminals, file tree, editor, presence), settings (provider credentials later).
+## 7. Control plane
+Next.js 16 App Router, server components + server actions, route handlers only for the connect token and Auth.js. Auth.js v5 credentials provider with scrypt hashes, JWT sessions, `proxy.ts` as a convenience gate (every action re-checks membership). Drizzle over postgres.js. Dev: root `.env` is loaded by `next.config.ts`; `allowedDevOrigins` includes 127.0.0.1.
 
 ## 8. Deployment topology
+Development on Windows + Docker Desktop (verified). Production for personal use (planned, M2): one Linux VPS with compose (caddy, web, orchestrator with docker socket, worker, postgres on a control-only network). Guard the host's disk: builds, volumes and the Docker VM disk share it; a full disk turned Docker read-only during development.
 
-- **Development (today):** Windows 11 + Docker Desktop. Orchestrator runs on the host with `AGENT_CONNECT_MODE=published`; workspace containers are Linux containers in Docker Desktop. The image is built from the repository root.
-- **Production for personal use (M2, planned):** one Linux VPS running `docker compose` with: `caddy` (TLS, reverse proxy), `web`, `orchestrator` (with `/var/run/docker.sock` mounted; it is trusted infrastructure), `postgres`. Workspaces are sibling containers created through the socket, on the `notea-workspaces` network; Postgres lives on a separate `notea-control` network that workspaces cannot reach. Only 443 is exposed.
-- Migration path: multiple runtime hosts = multiple orchestrators keyed by a `runtimeHostId` on the workspace row; Kubernetes only if a real scheduling need appears.
+## 9. The hard problems: status
+| Problem | Status |
+|---|---|
+| Remote environments, persistence | done (containers + HOME volume; image upgrades) |
+| Terminals, PTY, realtime | done |
+| Multi-user | roles, presence, shared terminals, fs change notices done; invites by link, watcher, rate limiting pending |
+| Concurrent edits | etag conflicts + notices; CRDT later |
+| Agent execution | done for CLIs via terminal sessions; Claude Code parser needs a real run to confirm |
+| Provider abstraction | done (catalog, credential env, runtimes) |
+| Agent isolation / coordination | done (worktrees, scope leases, serialized integration, approvals) |
+| Auth / permissions | done for personal use |
+| Secrets | encrypted credentials, per-run injection, allow-listed env |
+| Resource limits / sandboxing | container limits; disk quotas pending |
+| Previews, deployment, observability | pending |
 
-## 9. The hard problems: now vs later
+## 10. Stack (pinned in package.json files)
+Node 24 · TS 5.9 · zod 4 · ws 8 · node-pty 1.1 · Fastify 5 · dockerode 5 · jose 6 · Next 16.3 · React 19 · Tailwind 4 · Auth.js 5 beta · Drizzle 0.45 · postgres.js 3 · Postgres 17 · xterm 6 · CodeMirror 6 · vitest 4 · esbuild · tsx. Image CLIs: claude-code 2.1.272, codex 0.154.0, gemini-cli 0.59.0.
 
-| # | Problem | Now (M0–M2) | Later |
-|---|---|---|---|
-| A/B | Remote environments, containers vs VMs | Docker containers on one host. | gVisor/Kata/Firecracker for untrusted tenants; per-project images. |
-| C | Persistent workspaces | Named volume at `/home/dev`; container disposable. | Snapshots to object storage; volume quotas; backup/restore. |
-| D/E | Terminal streaming, PTY | Done: in-container node-pty, multi-attach, scrollback. | Binary frames; flow control; exact screen serialisation. |
-| F | Realtime | WebSocket bridge + JSON protocol v1. | SSE for control-plane events; possibly WebRTC data channels for very low latency. |
-| G | Multi-user | Identity + roles + presence are in the protocol and agent today. | Invites, UI, per-workspace policies. |
-| H | Concurrent file edits | Etag conflict detection on write. | CRDT (Yjs) for the editor; file watcher events. |
-| I | Agent execution | Designed: agent CLIs in tagged terminals. | Headless runs with structured event streams. |
-| J | Provider abstraction | Designed: provider → credential → model → runtime. | Cost tracking, capability matrix, fallbacks. |
-| K | Agent isolation | Designed: git worktree per task; same container. | Sibling container per agent sharing the volume; per-agent credentials. |
-| L | Agent coordination | Designed: scope leases + serialised integration queue. | Automatic conflict repair tasks, policy engine. |
-| M | Authentication | Connect JWTs + API key today; Auth.js credentials in M1. | OAuth/SSO, sessions table, device management. |
-| N | Permissions | Roles enforced in the agent per message. | Path-level and action-level policies; agent-specific permissions. |
-| O | Secrets / API keys | `.env` for service secrets; agent token never enters shells. | Encrypted credential store; per-run injection; rotation. |
-| P/Q | Resource limits, sandboxing | cpu/mem/pids/shm limits; cap-drop ALL; no-new-privileges; non-root; no host mounts. | Disk quotas; seccomp profiles; user namespaces; runtime sandboxes. |
-| R | Network security | Loopback-only published ports; API key; TLS via Caddy in M2. | Egress policies per workspace; private networks per tenant. |
-| S | Project persistence | Volume + git. | Snapshots, export, import from git URL at creation. |
-| T | Previews | Not yet. | Port detection in agent + authenticated proxy `https://<ws>-<port>.host`. |
-| U | Deployment | Not yet. | Deploy adapters (Vercel, Docker hosts). |
-| V | Observability | Structured JSON logs (agent) and pino (orchestrator); health endpoints. | Metrics, tracing, activity feed as audit trail. |
-| W | Failure recovery | Docker restart policy; stateless orchestrator; reconnect + re-attach. | Health-based auto-restart of the agent; snapshots. |
+## 11. Reversible vs expensive
+Expensive: protocol shapes, identity model, HOME layout, control/runtime split, worktree-per-task + serialized integration, task status names. Reversible: worker placement, polling vs LISTEN/NOTIFY, JSON frames, UI framework details, base image contents.
 
-## 10. Technology stack (pinned in `package.json` files)
-
-Node 24 · TypeScript 5.9 · npm workspaces · zod 4 · ws 8 · node-pty 1.1 · Fastify 5 + @fastify/websocket 11 · dockerode 5 · jose 6 · esbuild 0.28 · vitest 4 · tsx 4. Planned: Next.js 16, React 19, Tailwind 4, xterm.js 6, Auth.js 5, Drizzle 0.45, postgres.js, Postgres 17.
-
-## 11. Reversible vs expensive decisions
-
-**Expensive to change later (get right now):** protocol shape and identity model; one-container-per-workspace with a persistent HOME volume; control plane / runtime plane split; agents as first-class participants; worktree-based agent isolation; ids and roles in the data model.
-
-**Reversible:** Fastify vs anything else; npm vs pnpm; JSON vs binary frames; Auth.js vs another auth library; the specific base image contents; `published` vs `network` connect mode; where the agent runner process lives.
-
-## 12. Prior art detail
-
-- **Coder / Gitpod (Ona) / Codespaces / Daytona / DevPod:** container-per-workspace with an in-workspace agent binary and a browser or IDE front end. Notea's agent is the same idea, deliberately minimal, TypeScript, and shared by humans and AI agents.
-- **Coterm:** macOS app for two developers to pair on Claude Code sessions with shared terminal/browser, self-hosted relay on Cloudflare (GPL). Confirms demand for shared agent terminals; single-platform and not a persistent environment.
-- **Clopen:** all-in-one workspace for multiple agent CLIs with chat, terminal, git, preview and real-time collaboration. Closest feature overlap; local-first rather than a shared remote environment.
-- **Conductor, Claude Squad, Vibe Kanban, cmux:** parallel-agent runners on one developer's machine using worktrees and tmux. Notea reuses the worktree-per-task pattern and adds multi-human, remote and persistent.
-- **GitHub Next Ace:** research prototype of a realtime multiplayer agent workspace on shared cloud computers. Validates the concept; not available as a product.
-
-Sources consulted on 2026-09-15: coterm.cc, github.com/myrialabs/clopen, github.com/bradAGI/awesome-cli-coding-agents, tembo.io/blog/ai-agent-orchestration-tools, augmentcode.com/tools/open-source-agent-orchestrators, nimbalyst.com (worktree tool comparisons), github.com/github/app/issues/123 (Ace).
+## 12. Prior art
+See session-1 notes in `PROJECT_SPEC.md` §10 (Coder, Ona, Codespaces, Coterm, Clopen, Conductor, Claude Squad, cmux, GitHub Next Ace).

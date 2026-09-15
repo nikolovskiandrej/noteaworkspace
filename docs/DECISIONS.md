@@ -113,3 +113,40 @@ Format: context → options → decision → why → revisit when. Numbers are s
 
 ### D-021 npm install scripts are allow-listed explicitly
 **Context.** npm 11.16+ blocks package install scripts unless allow-listed. `esbuild` and `node-pty` are approved in the root `package.json`; `node-pty` is approved in the image's `package.json`. `ssh2` and `protobufjs` (dockerode transitive) are deliberately not approved; they work without their optional native builds.
+
+---
+
+### D-023 Password hashing with Node's scrypt, no native dependency
+**Decision.** `scrypt$N$r$p$salt$hash` via `node:crypto`; parameters recorded per hash.
+**Why.** No install scripts, no platform binaries; memory-hard and adequate for a self-hosted tool.
+
+### D-024 Agent runs execute in watchable terminal sessions; exec is for short commands
+**Decision.** Runtimes start the CLI in a PTY session created through the protocol (everyone can attach); `exec` (protocol 1.1) is used for git/check commands and is killed when its connection closes.
+**Why.** Glass-box agents (PROJECT_SPEC principle 1) and scrollback replay for free; exec stays simple and cannot leak detached processes.
+
+### D-025 Claude Code runs headless with `--dangerously-skip-permissions`
+**Decision.** Default `permissionMode: bypass` in `ClaudeCodeRuntime`; `acceptEdits` available.
+**Why.** Headless runs cannot answer permission prompts; the container, the throw-away worktree, scoped credentials and human review before integration are the sandbox. Revisit when per-tool permission policies exist.
+
+### D-026 A separate worker process drives agent tasks
+**Options.** Inside the web app (unreliable for long jobs), inside the orchestrator (mixes control-plane logic into the runtime plane), separate process polling Postgres.
+**Decision.** `apps/worker`, polling every 2 s, optimistic claims, heartbeats, stale-run recovery.
+**Why.** Durable queue in the database, restart-safe, scalable to several workers later without touching the orchestrator.
+**Revisit.** Use LISTEN/NOTIFY instead of polling if latency matters.
+
+### D-027 Provider credentials encrypted with AES-256-GCM under CREDENTIALS_KEY
+**Decision.** Stored as `v1:<iv>:<tag>:<ciphertext>`; decrypted by the worker only for the run that selected them; injected into the session env only; the web app decrypts solely to render a masked hint.
+**Revisit.** Envelope encryption / KMS for multi-tenant hosting.
+
+### D-028 Containers are recreated on start when the image behind the tag changed
+**Why.** Otherwise image upgrades (new agent, new CLIs) never reach existing workspaces; found when the first real task failed against a stale agent.
+
+### D-029 OrchestratorClient lives in `packages/workspace-client`
+**Why.** The web app and the worker share one implementation.
+
+### D-030 Coordination policy is a per-workspace JSON document; integration is serialised in-process
+**Decision.** `{overlap: warn|block, integration: auto|human, checkCommand, baseBranch}` on `workspaces`; `PerKeyMutex` serialises integrations per workspace within the worker.
+**Why.** Enough for one worker; a database advisory lock is the upgrade path for several workers.
+
+### D-031 Next.js development must allow the 127.0.0.1 origin
+**Context.** Next 16 blocks its dev resources cross-origin; pages reached as 127.0.0.1 silently never hydrated. `allowedDevOrigins` is set in `next.config.ts`. Operational note, not a design choice.

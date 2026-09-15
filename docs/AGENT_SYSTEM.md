@@ -1,155 +1,54 @@
 # Notea Workspace — Agent System
 
-Last updated: 2026-09-15. Status: **designed**. Nothing in this document is implemented yet except the parts of the protocol that already treat agents as participants (`kind: "agent"`, roles, presence).
+Last updated: 2026-09-15 (session 2). Status: **implemented** (packages/agents, apps/worker, web tasks UI) and **verified in Docker with the generic runtime**; the Claude Code runtime is implemented and unit-tested but has not yet run against the real CLI.
 
-## 1. Purpose and principles
+## 1. Principles (unchanged)
+Agents are participants; isolation by worktree, integration by queue; scopes declared, leases advisory, integration authoritative; the repository is the memory; provider-agnostic; humans can always see, stop and approve.
 
-Multiple AI coding agents, from different providers, work inside one workspace alongside humans without chaos.
-
-1. **Agents are participants.** An agent connects like a human (`ClientIdentity{kind:"agent"}`), gets terminal sessions everyone can watch, and appears in presence and the activity feed.
-2. **Isolation by worktree, integration by queue.** Each task runs in its own git worktree on its own branch. Finished work is integrated one task at a time after checks. Nobody edits the main tree concurrently with agents by default.
-3. **Scopes are declared, leases are advisory, integration is authoritative.** Overlap is detected early (warn/block) and resolved late (rebase + checks), because CLI agents cannot be forced to honour file locks.
-4. **The repository is the memory.** Task briefs point agents at versioned project docs; the platform stores metadata and activity, not knowledge.
-5. **Provider-agnostic.** Only provider adapters know vendor names. Everything above them speaks `AgentRuntime`.
-6. **Humans can always see, stop and approve.**
-
-## 2. Layering
+## 2. Layering (as implemented)
 
 ```
-Provider        anthropic | openai | google | …          (adapter: auth env vars, model catalog, cost table)
-   ↓
-Credential      user-owned key or CLI login, encrypted at rest, injected per run
-   ↓
-Model           id, provider, capabilities (tools, context, streaming), price
-   ↓
-AgentRuntime    how the model is driven: claude-code-cli | codex-cli | gemini-cli | api-loop (later)
-   ↓
-Workspace       the container; the runtime executes inside it (terminal session)
-   ↓
-Task            description, scope, worktree/branch, status, owner, runs
-   ↓
-Project         the git repository in /home/dev/project and its docs
+Provider        packages/agents/src/providers.ts   anthropic | openai | google → credential env var, model catalog
+Credential      provider_credentials (encrypted) or a CLI login on the workspace volume
+Model           ModelRef {provider, modelId}; catalog entries may be marked unverified
+AgentRuntime    claude-code-cli (headless, parsed) | codex-cli | gemini-cli | generic-cli (unparsed)
+Workspace       the container; runs execute in a terminal session created through the protocol
+Task            agent_tasks row: description, scope, runtime, model, credential, branch, status, usage
+Project         /home/dev/project (main tree) + /home/dev/.notea/worktrees/<taskId>
 ```
 
-## 3. Modes of operation
+## 3. Modes
+- **Interactive** (available today by hand): open a terminal, run `claude`/`codex`/`gemini`; everyone can watch. Not yet tied to a task record.
+- **Headless task run** (implemented): the worker starts the runtime in a terminal session with the brief; output is parsed into events; the session is visible in the UI as `agent: <name>`.
+- **API loop** (later): same interface, Notea-owned tools.
 
-**Interactive mode (M4 first step).** A human starts an agent CLI (for example `claude`) in a terminal session that the platform tags with an agent identity and, optionally, a task. Everyone can watch or take over. This needs almost nothing beyond what exists: create a session with `command: "claude"`, `title`, `createdBy` of the agent identity, and a cwd of the task worktree. Credentials come from the CLI's own login stored on the persistent HOME (personal MVP) or from injected environment variables.
+## 4. Runtime interface (actual)
+`packages/agents/src/types.ts`: `AgentRuntime { id, label, provider, supports(model), start(ctx, session) → AgentRunHandle { sessionId, events: AsyncIterable<AgentRunEvent>, cancel() } }`. `WorkspaceSession` is the small surface runtimes need (create/kill terminal, output/exit listeners, write a host file); `ClientWorkspaceSession` implements it over `WorkspaceClient`. `startTerminalRun` turns a command into an event stream with a max-minutes timeout.
 
-**Headless task mode (M4 second step).** The platform runs the CLI non-interactively with a task brief and consumes a structured event stream (JSONL) to populate the activity feed, cost and file-change summaries. The PTY is still used so humans can watch, but input comes from the runner. Examples of headless entry points to verify at implementation time (exact flags change between releases):
-- Claude Code: `claude -p "<brief>" --output-format stream-json` plus hooks for tool events; `--permission-mode` and `--allowedTools` for policy.
-- Codex CLI: `codex exec "<brief>" --json`.
-- Gemini CLI: non-interactive prompt mode with JSON output.
+## 5. Claude Code runtime
+Command: `cd <worktree> && claude -p "$(cat brief.md)" --output-format stream-json --verbose [--model X] [--max-turns N] --dangerously-skip-permissions`. Parser (`parseClaudeStreamLine`): `assistant`/`user` records → `message` and `tool_call` (+ `file_changed` for Edit/Write/MultiEdit/NotebookEdit), `result` → `usage` + `finished`, everything else → `log`. **Verify against CLI 2.1.272 on the first real run**; add real output samples to the tests.
 
-**API-loop mode (later).** A Notea-owned loop over provider SDKs with Notea tools (terminal, files). Behind the same interface; gives full control over tools, permissions and cost, at the price of maintaining a harness.
+## 6. Isolation (implemented)
+`GitWorktrees`: `ensureRepository` (git init + initial commit if needed), `createTaskWorktree` (idempotent; reuses an existing worktree/branch), `commitAll` as the agent identity, `commitsAhead`, `diffStat`, `rebaseOnto` (aborts on conflict), `fastForward` (refuses if the main tree is dirty or on another branch), `removeTaskWorktree`. Worktrees have no `node_modules`; agents install if they need to (open question).
 
-## 4. `AgentRuntime` interface (proposed, `packages/agents`)
+## 7. Coordination (implemented)
+- **Task statuses**: `draft → queued → running → needs_review → approved → integrating → done`, with `failed`, `cancelled`, `needs_rebase`, `checks_failed` and legal re-queues (`packages/agents/src/tasks.ts`).
+- **Scope leases**: at claim time the worker compares the candidate's scope with running/integrating tasks in the workspace (`scopesOverlap`, conservative glob semantics); policy `block` keeps it queued, `warn` runs it. Empty scope means the whole project.
+- **Integration** (`integrateTask`): rebase → optional check command → fast-forward; serialised per workspace with `PerKeyMutex`. Outcomes map to `done`, `needs_rebase`, `checks_failed`, `failed`.
+- **Approvals**: `integration: human` (default) requires an editor/owner to approve; `auto` approves completed runs.
+- **Humans**: can cancel (running tasks are interrupted within the heartbeat interval), re-run, delete, watch the agent terminal live, and edit the policy (owner).
 
-```ts
-export interface AgentRunContext {
-  workspaceId: string;
-  taskId: string;
-  worktreePath: string;          // /home/dev/.notea/worktrees/<taskId>
-  branch: string;                // notea/task/<taskId>
-  brief: string;                 // generated task brief (see §8)
-  model: ModelRef;               // { provider, modelId }
-  credentialEnv: Record<string, string>; // e.g. ANTHROPIC_API_KEY — injected into the session only
-  identity: ClientIdentity;      // kind: "agent"
-  limits: { maxMinutes: number; maxCostUsd?: number };
-}
+## 8. Brief (implemented)
+`buildTaskBrief`: task, worktree/branch rules, scope, reserved paths of other running tasks, environment-level change warning, pointers to `AGENTS.md`/`docs/CURRENT_STATE.md`, check command, finish instructions. Written to `/home/dev/.notea/runs/<runId>/brief.md` and passed to the CLI.
 
-export type AgentRunEvent =
-  | { type: 'started'; sessionId: string }
-  | { type: 'message'; role: 'assistant' | 'tool'; text: string }
-  | { type: 'tool_call'; name: string; input: unknown }
-  | { type: 'file_changed'; path: string }
-  | { type: 'usage'; inputTokens: number; outputTokens: number; costUsd?: number }
-  | { type: 'finished'; outcome: 'completed' | 'failed' | 'cancelled' | 'timeout'; summary?: string }
-  | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
+## 9. Credentials (implemented)
+Stored encrypted per user; selected per task; the worker decrypts with `CREDENTIALS_KEY` and injects `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` into the run's terminal session only (`term.create.env`). Without a credential the CLI's own login on the volume is used.
 
-export interface AgentRuntime {
-  readonly id: 'claude-code-cli' | 'codex-cli' | 'gemini-cli' | 'api-loop';
-  supports(model: ModelRef): boolean;
-  start(ctx: AgentRunContext, workspace: WorkspaceClient): Promise<AgentRunHandle>;
-}
+## 10. Usage and cost (partial)
+`usage` events (Claude Code `result` records) are summed per run and stored on the task. No budgets, no per-user reports yet.
 
-export interface AgentRunHandle {
-  events: AsyncIterable<AgentRunEvent>;
-  send(input: string): Promise<void>;   // steer an interactive run
-  cancel(): Promise<void>;
-}
-```
+## 11. Failure handling (implemented)
+Runtime exceptions → run/task `failed` with the message; process exit ≠ 0 → `failed`; max-minutes timeout → `timeout`; cancellation → `cancelled`; worker crash → stale-run recovery marks runs failed after 2 minutes without a heartbeat; container restart mid-run → the run fails, the worktree/branch persist, re-run continues on the same branch.
 
-`WorkspaceClient` is a thin wrapper over the workspace WebSocket protocol (create session, input, attach, fs.*). The runner process that hosts runtimes lives next to the orchestrator in M4 (it connects with an agent connect token) and can move inside the container later without changing the interface.
-
-## 5. Providers and credentials
-
-- Provider adapters map a credential to environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) and expose a model catalog with capabilities and prices.
-- Credentials are per user, stored encrypted (AES-256-GCM with `CREDENTIALS_KEY` from the environment) in `provider_credentials`; never written to the workspace volume by the platform; injected into the agent's terminal session environment only for the duration of a run (`term.create` will need an `env` field: **protocol v1.1 change, additive**).
-- Personal MVP shortcut: users may simply log in to CLIs inside the workspace; those tokens live on the volume under HOME. Documented in `SECURITY_MODEL.md` as acceptable for personal use only.
-
-## 6. Isolation: worktrees
-
-Layout inside the container:
-
-```
-/home/dev/project                        main working tree (humans; integration target)
-/home/dev/.notea/worktrees/<taskId>      one worktree per task, branch notea/task/<taskId>
-/home/dev/.notea/runs/<runId>/           logs, event JSONL, brief.md
-```
-
-Rules:
-- Created with `git worktree add -b notea/task/<id> <path> <base>` from the current integration branch (default `main`).
-- Agents run with cwd = worktree. The brief says so explicitly and forbids touching `/home/dev/project` directly.
-- Dependencies: a worktree has no `node_modules`; the runner executes the workspace's install command in the worktree before starting the agent (cost accepted; caches under HOME make it fast). Open question: symlinking `node_modules` from the main tree is faster but breaks when dependency changes are part of the task.
-- Ports: tasks that run dev servers must use ports from a per-task range handed in the brief (`PORT` env), to avoid collisions.
-- Cleanup: worktrees are removed after integration or on task abandonment; branches are kept until the task is closed.
-
-## 7. Coordination
-
-**Tasks** (`agent_tasks` table) carry: title, description, `scope` (list of path globs the task expects to touch), runtime, model, credential, base branch, branch, worktree path, status (`draft | queued | running | needs_review | needs_rebase | integrating | done | failed | cancelled`), created_by, approvals.
-
-**Leases** are derived from scopes: when a task starts, its scope is compared with the scopes of other running tasks. Policy per workspace: `warn` (start anyway, mark both as overlapping in the UI) or `block` (queue until the other finishes). Global-scope items (`package.json`, lockfiles, migrations directory, CI config) count as overlapping with every task by default because they are environment-level changes.
-
-**Integration queue** (single writer per workspace):
-1. Take the oldest task in `needs_review` with required approvals (policy: `auto` or `human`).
-2. `git fetch`; rebase `notea/task/<id>` onto the integration branch. Conflict → status `needs_rebase`, create a follow-up task for the same agent with the conflict context, stop.
-3. Run the workspace check command (for example `npm test`) in the rebased worktree. Failure → `needs_review` with logs, stop.
-4. Fast-forward the integration branch, record an activity event, remove the worktree, mark `done`.
-
-**Humans** can approve, reject, take over (attach to the agent's terminal and type), cancel, or edit the task and requeue. Everything is an activity event.
-
-**Environment-level operations** (dependency install, migrations, service restarts) are serialised through the same queue rather than raced in worktrees; the brief instructs agents to declare such needs instead of performing them when the policy is strict.
-
-## 8. Project memory and task briefs
-
-Versioned files in the project are the durable memory. Notea does not invent a new format; it standardises on what tools already read:
-
-- `AGENTS.md` (cross-tool standard, read by Codex/Gemini and others) at the project root: what the project is, how to run/test, conventions.
-- `CLAUDE.md` containing `@AGENTS.md` (or equivalent) so Claude Code reads the same file.
-- `docs/PROJECT_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/CURRENT_STATE.md`, `docs/DECISIONS.md`, `docs/HANDOFF.md` for depth.
-
-Per run, the platform generates `brief.md` and passes it as the prompt:
-1. Task title and description, acceptance criteria.
-2. Coordination rules: worktree path, branch, forbidden paths, port range, how to finish (commit on the task branch; do not merge), how to report (a final summary line).
-3. Pointers: "Read `AGENTS.md` and `docs/CURRENT_STATE.md` first."
-4. Constraints from scope overlaps, if any.
-
-After a run, the runner appends a short entry to `docs/CURRENT_STATE.md` on the task branch (what changed, what remains) so the next agent inherits it through integration. A platform-level summary also lands in the activity feed.
-
-## 9. Cost and usage
-
-Runtimes emit `usage` events (parsed from CLI JSON streams). The control plane aggregates per run/task/workspace/user in `agent_runs.usage`. Budget caps (`maxCostUsd`, `maxMinutes`) cancel a run and mark it `timeout`/`failed`.
-
-## 10. Failure handling
-
-- Agent CLI crashes: session exits → `term.exit` → run `failed` with the last output captured in scrollback and event log.
-- Runaway/loop: max minutes and cost caps; the human can attach and interrupt (Ctrl-C) since the session is a normal PTY.
-- Container restart mid-run: sessions vanish; runs are marked `failed`; the worktree and branch persist on the volume so the task can be resumed with a new run and a brief that says "continue".
-- Orchestrator restart: no effect on running CLIs (sessions live in the container); the runner reconnects and re-attaches by session id.
-
-## 11. Open questions for implementation time
-
-1. Exact headless flags and JSON event shapes for each CLI (verify against the installed versions; pin CLI versions in the image).
-2. Whether the runner process should live inside the container (simplest credential scoping, but then the agent process needs Docker-free access to Notea APIs) or beside the orchestrator (current proposal).
-3. `node_modules` strategy for worktrees (§6).
-4. How much of the integration queue to automate before human approval exists in the UI (recommendation: build approvals first, automation second).
+## 12. Open questions
+1. `node_modules` in worktrees. 2. Runner placement (beside orchestrator vs inside container). 3. Deleting task branches after integration. 4. Live streaming of run events to the UI (currently 5 s refresh). 5. Structured parsing for Codex/Gemini.

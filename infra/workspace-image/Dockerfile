@@ -33,6 +33,15 @@ RUN userdel -r node 2>/dev/null || true \
   && groupadd -g ${DEV_GID} dev \
   && useradd -m -u ${DEV_UID} -g dev -s /bin/bash dev
 
+# AI coding agent CLIs (pinned). Users log in from a workspace terminal, or the
+# worker injects an API key per run. Drop a line here to slim the image.
+RUN npm install -g --no-audit --no-fund \
+      @anthropic-ai/claude-code@2.1.272 \
+      @openai/codex@0.154.0 \
+      @google/gemini-cli@0.59.0 \
+  && npm cache clean --force \
+  && claude --version && codex --version && gemini --version
+
 # Workspace agent: bundled JS plus its single native dependency (node-pty).
 COPY packages/workspace-agent/image/package.json /opt/notea/agent/package.json
 RUN cd /opt/notea/agent \

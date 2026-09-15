@@ -73,11 +73,11 @@ A shared live AI engineering workspace:
 | Milestone | Statement | Status |
 |---|---|---|
 | **M0 Foundation** | Monorepo, protocol, workspace agent, orchestrator, base image; a terminal can be driven end to end through the orchestrator against a real container. | implemented; tested (55 unit/integration tests + Docker e2e passing on 2026-09-15) |
-| **M1 Personal workspace** | "I can create a Notea Workspace in a browser and get a terminal in a remote Linux environment." Web app with sign-in, workspace list, terminal UI, file tree + editor. | planned (next) |
-| **M2 Remote access** | "I can reach the same workspace from another computer." Single-VPS deployment with TLS, password auth, hardened defaults. | planned |
-| **M3 Multiplayer** | "Two people can use the same workspace simultaneously." Invites, roles, shared terminals with presence, file-change notifications, activity feed. | designed (agent side implemented) |
-| **M4 Agents in the workspace** | "AI coding agents can operate inside the workspace." Interactive agent CLIs as tagged terminals; headless task runs in worktrees; provider credentials scoped per run. | designed |
-| **M5 Coordination** | Tasks, scope leases, integration queue, approvals, cost tracking. | designed |
+| **M1 Personal workspace** | "I can create a Notea Workspace in a browser and get a terminal in a remote Linux environment." Web app with sign-in, workspace list, terminal UI, file tree + editor. | implemented; tested; verified in Chrome (2026-09-15) |
+| **M2 Remote access** | "I can reach the same workspace from another computer." Single-VPS deployment with TLS, password auth, hardened defaults. | planned (deployment); auth and hardening exist |
+| **M3 Multiplayer** | "Two people can use the same workspace simultaneously." Invites, roles, shared terminals with presence, file-change notifications, activity feed. | partially implemented (members/roles/presence/shared terminals/change notices/activity); invite links and watcher pending |
+| **M4 Agents in the workspace** | "AI coding agents can operate inside the workspace." Headless task runs in worktrees; provider credentials scoped per run; runs watchable as terminals. | implemented; tested; verified in Docker with the generic runtime; real Claude Code run pending |
+| **M5 Coordination** | Tasks, scope leases, integration queue, approvals, cost tracking. | implemented (leases, serialized integration, approvals, basic usage); budgets pending |
 | **M6 Previews and deployment** | Port detection and proxied preview URLs; later deployment targets. | planned |
 
 Details, acceptance criteria and ordering: `MVP_ROADMAP.md`.

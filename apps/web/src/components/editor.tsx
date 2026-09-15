@@ -88,6 +88,16 @@ export function Editor({ path, canWrite }: { path: string | null; canWrite: bool
     };
   }, [load, state]);
 
+  // Somebody else (a collaborator or an agent) saved this file through the file API.
+  useEffect(() => {
+    if (!client || !path) return;
+    return client.on('fs.changed', (message) => {
+      if (message.path !== path || message.etag === etagRef.current) return;
+      setStatus('conflict');
+      setMessage(`${message.by.name} changed this file on disk.`);
+    });
+  }, [client, path]);
+
   const save = useCallback(
     async (force = false) => {
       if (!path || !handleRef.current || !canWrite || !client) return;
