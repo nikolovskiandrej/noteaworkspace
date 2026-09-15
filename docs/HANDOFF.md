@@ -1,6 +1,6 @@
 # Notea Workspace — Handoff
 
-Written 2026-09-15, updated at the end of session 4 (migration verification + agent-pipeline hardening). Self-contained; the conversation is not needed. Read `CURRENT_STATE.md` next, then `ARCHITECTURE.md`, `AGENT_SYSTEM.md`, `DECISIONS.md`.
+Written 2026-09-15, updated at the end of session 5 (worktree/branch reaper + agent-package cleanup). Self-contained; the conversation is not needed. Read `CURRENT_STATE.md` next, then `ARCHITECTURE.md`, `AGENT_SYSTEM.md`, `DECISIONS.md`.
 
 ## 1. Product summary
 
@@ -28,7 +28,7 @@ Node 24, TypeScript 5.9, npm workspaces, zod 4, ws 8, node-pty 1.1, Fastify 5, d
 
 ## 6. Implemented and tested
 
-Everything listed under "Implemented behaviour" in `CURRENT_STATE.md`: protocol 1.1, agent daemon, orchestrator (incl. image-upgrade recreation), control plane with auth/roles/workspaces/members/terminal/editor/tasks/credentials, agents package, worker. 114 unit/integration tests + Docker e2e + manual browser verification of both the workspace UI and the complete task pipeline.
+Everything listed under "Implemented behaviour" in `CURRENT_STATE.md`: protocol 1.1, agent daemon, orchestrator (incl. image-upgrade recreation), control plane with auth/roles/workspaces/members/terminal/editor/tasks/credentials, agents package, worker (incl. the worktree/branch reaper). 142 unit/integration tests + Docker e2e + manual browser verification of both the workspace UI and the complete task pipeline.
 
 ## 7. Partially implemented
 
@@ -62,7 +62,7 @@ Unchanged from session 1 (`ARCHITECTURE.md` §4–6) plus: exec processes bound 
 
 ## 18. Known bugs
 
-None open. Fixed in session 4, each with tests: connect tokens written to the orchestrator log (D-033); the worker exceeding its concurrency limit (D-034); the integration lease released while another task still needed it (D-035); a lost terminal-exit notification hanging a run forever (D-036); an overridden failure losing the CLI's explanation (D-037). Earlier sessions: Next 16 `allowedDevOrigins`, provider constructed during SSR, proxy matcher export name, stale container image after rebuild.
+None open. Session 5 resolved the worktree/branch leak (formerly technical debt) with a worker-side reaper, verified against the live container (D-038). Fixed in session 4, each with tests: connect tokens written to the orchestrator log (D-033); the worker exceeding its concurrency limit (D-034); the integration lease released while another task still needed it (D-035); a lost terminal-exit notification hanging a run forever (D-036); an overridden failure losing the CLI's explanation (D-037). Earlier sessions: Next 16 `allowedDevOrigins`, provider constructed during SSR, proxy matcher export name, stale container image after rebuild.
 
 ## 19. Technical debt
 
@@ -78,7 +78,13 @@ Tested: see §6 and the verification table in `CURRENT_STATE.md`, which now cove
 
 Not tested: an **authenticated** agent run of any provider — the one real gap; `network` connect mode on Linux; more than one worker process; long-running (hours) sessions; browser on mobile; recovery from a workspace connection dropped mid-run (the 10 s exit-grace fallback covers it in unit tests, not against a real severed connection).
 
-## 23. Exact current state (session 4)
+## 23. Exact current state (session 5)
+
+**A worker-side worktree/branch reaper was added, and the agent package's git layer was cleaned up.** `apps/worker/src/reaper.ts` runs on the worker tick (`WORKER_REAP_INTERVAL_MS`, default 60 s): it removes the worktree and branch of a deleted task (archiving the branch tip to `refs/notea/archive/<id>` first) and the merged branch of an integrated task, keeps re-runnable and active tasks, in-use worktrees and `main`, scans only running containers, and skips a workspace while any task there is active (D-038). Verified against the demo container: it reaped exactly the one leftover `done` branch and was idempotent. `GitWorktrees` gained the read/query/delete helpers this needs, `removeTaskWorktree` is now single-purpose, and `packages/agents/src/layout.ts` centralises run-artefact paths (the four runtimes use `runBriefPath` instead of hardcoding). Suite: worker 8 → 17, total 133 → 142, all green; typecheck and `next build` clean.
+
+This built on an incomplete, uncommitted refactor of `git.ts` (the reaper helper toolkit) plus `layout.ts` found in the working tree at session start; that work was adopted and finished rather than discarded, and `processor.ts` was updated to the new single-arg `removeTaskWorktree`.
+
+## 23a. Prior state (session 4)
 
 **The migration was re-verified independently, and the agent pipeline was hardened.** Storage: Docker's data disk is at `D:\DockerDesktop\wsl` (confirmed from Docker's own settings API and the WSL registration), nothing of this project's remains on C:, and the repository contains no C: paths outside documentation. Environment: all four migrations applied and in sync with the journal, Postgres on 55432 with the other project's Postgres untouched on 5432, container hardening intact (non-root `dev`, `CapDrop ALL`, `no-new-privileges`, no bind mounts), all three agent CLIs present in the running container.
 
@@ -99,7 +105,7 @@ The `demo-project` workspace exists in the dev database (`ebc7f427-…`); its co
 1. Start the stack: `docker compose -p notea-dev -f infra/compose/docker-compose.dev.yml up -d`, then orchestrator, web and **exactly one** worker (§29).
 2. Provide a credential — store an Anthropic key under Settings → Credentials, or run `claude login` in a workspace terminal.
 3. Re-queue "Claude: add a CHANGELOG entry" and watch the first *authenticated* run: the agent should edit inside `/home/dev/.notea/worktrees/<taskId>`, the task should reach `needs_review` with a real diff stat, and approving it should rebase and fast-forward `main`. Add the real `assistant`/`tool_use`/`result` records as fixtures next to the unauthenticated ones already in `packages/agents/test/runtimes.test.ts`.
-4. Then pick up, in rough order of value: a worktree reaper on the worker tick (known issue 3), live run events instead of the 5 s refresh (`IMPLEMENTATION_PLAN.md` step 3), and the M2 leftovers.
+4. Then pick up, in rough order of value: live run events instead of the 5 s refresh (`IMPLEMENTATION_PLAN.md` step 3) and the M2 leftovers. The worktree/branch reaper is done (session 5, D-038).
 
 Before sharing a workspace with anyone, read `SECURITY_MODEL.md` → Provider credentials: a collaborator with terminal access can read the key of a run in flight through `/proc`.
 

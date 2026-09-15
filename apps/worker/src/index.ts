@@ -5,6 +5,7 @@ import { createDatabase } from '@notea/db';
 import { OrchestratorClient } from '@notea/workspace-client';
 import { loadConfig } from './config';
 import { RunSlots, findApprovedTasks, integrateApprovedTask, recoverStaleRuns, runTask, startDueRuns, type ProcessorDeps } from './processor';
+import { reapAll } from './reaper';
 import { createWorkspaceConnector } from './workspace-connection';
 
 for (const candidate of [path.resolve(process.cwd(), '.env'), path.resolve(process.cwd(), '../../.env')]) {
@@ -46,9 +47,15 @@ async function main(): Promise<void> {
   const inFlight = new Set<Promise<void>>();
   const slots = new RunSlots(config.WORKER_MAX_CONCURRENT_RUNS);
   let stopping = false;
+  let lastReapAt = 0;
   const track = (promise: Promise<void>) => {
     inFlight.add(promise);
     void promise.catch(() => undefined).finally(() => inFlight.delete(promise));
+  };
+
+  const listRunningWorkspaceIds = async (): Promise<string[]> => {
+    const { workspaces: runtimes } = await orchestrator.listWorkspaces();
+    return runtimes.filter((w) => w.status === 'running').map((w) => w.workspaceId);
   };
 
   const tick = async () => {
@@ -59,6 +66,17 @@ async function main(): Promise<void> {
       track(promise);
       return promise;
     });
+    // Reap orphaned worktrees/branches on its own cadence, never blocking task work.
+    if (config.WORKER_REAP_INTERVAL_MS > 0 && Date.now() - lastReapAt >= config.WORKER_REAP_INTERVAL_MS) {
+      lastReapAt = Date.now();
+      track(
+        reapAll(deps, deps.connect, listRunningWorkspaceIds)
+          .then((result) => {
+            if (result.removedWorktrees > 0 || result.deletedBranches > 0) log.info('reaper finished', { ...result });
+          })
+          .catch((err: unknown) => log.warn('reaper failed', { error: err instanceof Error ? err.message : String(err) })),
+      );
+    }
   };
 
   while (!stopping) {

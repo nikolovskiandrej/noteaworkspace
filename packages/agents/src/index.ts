@@ -8,7 +8,19 @@ export {
   shellQuote,
   type ScriptedResponse,
 } from './command-runner';
-export { DEFAULT_GIT_PATHS, GitWorktrees, taskBranch, taskWorktreePath, type GitPaths } from './git';
+export {
+  DEFAULT_GIT_PATHS,
+  GitWorktrees,
+  TASK_ID_PATTERN,
+  parseWorktreeList,
+  taskBranch,
+  taskIdOfBranch,
+  taskIdOfWorktreePath,
+  taskWorktreePath,
+  type GitPaths,
+  type WorktreeEntry,
+} from './git';
+export { DEFAULT_RUNS_DIR, runBriefPath, runDirectory } from './layout';
 export { PerKeyMutex, integrateTask, type IntegrationInput, type IntegrationResult } from './integration';
 export {
   ACTIVE_TASK_STATUSES,

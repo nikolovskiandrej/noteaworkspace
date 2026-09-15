@@ -1,4 +1,5 @@
 import { shellQuote } from '../command-runner';
+import { runBriefPath } from '../layout';
 import { now, startTerminalRun, stripAnsi } from '../terminal-run';
 import type { AgentRunContext, AgentRunHandle, AgentRuntime, ModelRef, WorkspaceSession } from '../types';
 
@@ -30,7 +31,7 @@ export class GeminiRuntime implements AgentRuntime {
   }
 
   async start(ctx: AgentRunContext, session: WorkspaceSession): Promise<AgentRunHandle> {
-    const briefPath = `/home/dev/.notea/runs/${ctx.runId}/brief.md`;
+    const briefPath = runBriefPath(ctx.runId);
     await session.writeHostFile(briefPath, ctx.brief);
     await session.ensureHostFile('/home/dev/.gemini/settings.json', JSON.stringify({ security: { folderTrust: { enabled: false } } }, null, 2) + '\n');
     return startTerminalRun(session, {

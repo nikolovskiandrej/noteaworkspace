@@ -1,4 +1,5 @@
 import { shellQuote } from '../command-runner';
+import { runBriefPath } from '../layout';
 import { now, startTerminalRun, stripAnsi } from '../terminal-run';
 import type { AgentRunContext, AgentRunEvent, AgentRunHandle, AgentRuntime, ModelRef, WorkspaceSession } from '../types';
 
@@ -29,7 +30,7 @@ export class CodexRuntime implements AgentRuntime {
   }
 
   async start(ctx: AgentRunContext, session: WorkspaceSession): Promise<AgentRunHandle> {
-    const briefPath = `/home/dev/.notea/runs/${ctx.runId}/brief.md`;
+    const briefPath = runBriefPath(ctx.runId);
     await session.writeHostFile(briefPath, ctx.brief);
     return startTerminalRun(session, {
       command: '/bin/bash',

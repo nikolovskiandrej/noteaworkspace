@@ -10,6 +10,8 @@ const EnvSchema = z.object({
   WORKER_ID: z.string().min(1).default(`${os.hostname()}-${process.pid}`),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(250).default(2000),
   WORKER_MAX_CONCURRENT_RUNS: z.coerce.number().int().min(1).default(3),
+  /** How often to reap orphaned task worktrees/branches. 0 disables the reaper. */
+  WORKER_REAP_INTERVAL_MS: z.coerce.number().int().min(0).default(60_000),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 

@@ -1,3 +1,4 @@
+import { runBriefPath } from '../layout';
 import { now, startTerminalRun } from '../terminal-run';
 import type { AgentRunContext, AgentRunHandle, AgentRuntime, ModelRef, ProviderId, RuntimeId, WorkspaceSession } from '../types';
 
@@ -30,7 +31,7 @@ export class GenericCliRuntime implements AgentRuntime {
   }
 
   async start(ctx: AgentRunContext, session: WorkspaceSession): Promise<AgentRunHandle> {
-    const briefPath = `/home/dev/.notea/runs/${ctx.runId}/brief.md`;
+    const briefPath = runBriefPath(ctx.runId);
     await session.writeHostFile(briefPath, ctx.brief);
     return startTerminalRun(session, {
       command: '/bin/bash',

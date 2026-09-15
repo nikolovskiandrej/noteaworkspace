@@ -311,7 +311,7 @@ export async function integrateApprovedTask(deps: ProcessorDeps, task: AgentTask
             : result.status === 'checks_failed'
               ? 'checks_failed'
               : 'failed';
-      if (nextStatus === 'done') await git.removeTaskWorktree(task.id, { deleteBranch: false });
+      if (nextStatus === 'done') await git.removeTaskWorktree(task.id);
       await db
         .update(agentTasks)
         .set({ status: nextStatus, lastLog: result.log, updatedAt: now(), finishedAt: nextStatus === 'done' ? now() : task.finishedAt })

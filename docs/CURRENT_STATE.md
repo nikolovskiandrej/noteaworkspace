@@ -1,10 +1,10 @@
 # Notea Workspace — Current State
 
-Last updated: 2026-09-15, end of session 4 (migration verification + agent-pipeline hardening). Update this file whenever reality changes.
+Last updated: 2026-09-15, end of session 5 (worktree/branch reaper + agent-package cleanup). Update this file whenever reality changes.
 
 ## One-line status
 
-**M0 (runtime), M1 (control plane + browser UI) and the core of M3 (agent tasks in isolated worktrees with human-approved, serialized integration) are implemented, tested, and verified end to end in Docker — including the browser UI, real cancellation, real timeouts, and real runs of all three agent CLIs. M2 collaboration is partially done (membership, roles, shared terminals, presence, file-change notices). Storage lives on D: (session 3) and was re-verified independently in session 4. The one thing that has never happened is an *authenticated* agent run: no provider credential exists on this machine, so every CLI stops at its own auth check.**
+**M0 (runtime), M1 (control plane + browser UI) and the core of M3 (agent tasks in isolated worktrees with human-approved, serialized integration) are implemented, tested, and verified end to end in Docker — including the browser UI, real cancellation, real timeouts, and real runs of all three agent CLIs. M2 collaboration is partially done (membership, roles, shared terminals, presence, file-change notices). Storage lives on D: (session 3) and was re-verified independently in session 4. Session 5 added a worker-side reaper that cleans orphaned task worktrees and branches (D-038), verified against the live container. The one thing that has never happened is an *authenticated* agent run: no provider credential exists on this machine, so every CLI stops at its own auth check.**
 
 ## Repository (actual contents)
 
@@ -36,7 +36,8 @@ notea-workspace/
 |---|---|
 | `npm run typecheck` | OK across all 9 workspaces |
 | `npm test` (no `DATABASE_URL`) | OK, exit 0: agents 28 · protocol 6 · workspace-agent 42 · workspace-client 6 · orchestrator 21 (+1 e2e skipped) · web 13 (+7 skipped) · db and worker skip themselves |
-| `npm test` for `@notea/db` and `@notea/worker` with `DATABASE_URL` | OK: db 1 · worker 8 (task lifecycle, cancellation, stale-run recovery, concurrency limit, integration lease). Run against a throw-away database (`CREATE DATABASE notea_test`), because the worker suite deletes tasks in `beforeEach`. |
+| `npm test` for `@notea/db` and `@notea/worker` with `DATABASE_URL` | OK: db 1 · worker 17 (task lifecycle, cancellation, stale-run recovery, concurrency limit, integration lease, and the worktree/branch reaper — planner, git collection, execution and the DB-gated skip/reap paths). Run against a throw-away database (`CREATE DATABASE notea_test`), because the worker suite deletes tasks in `beforeEach`. |
+| Reaper (real, in Docker) | OK: run against the demo workspace's live container, it deleted exactly the one merged `done` branch (`notea/task/7c7b3512…`), left the three failed worktrees and branches and `main` untouched, produced a sane `git worktree list`, and a second run was a no-op. |
 | `npm run test:e2e -w @notea/orchestrator` (`NOTEA_E2E_DOCKER=1`) | OK: 18 tests — container create → terminal I/O → exec with injected env → file persistence across restart → cleanup |
 | `npm run build:image` | OK: `notea/workspace:dev` rebuilt in 2.9 min and verified to contain claude-code 2.1.272, codex-cli 0.154.0, gemini-cli 0.59.0, Node 24.21, git 2.39. The build consumed **0 bytes of C:** and 1.75 GB of D: (storage migration, below). |
 | `npm run build -w @notea/web` | OK: production `next build` compiles and prerenders 5 routes |
@@ -62,7 +63,7 @@ Without `DATABASE_URL`, the db/web/worker database suites skip themselves. Witho
 
 1. **No authenticated agent run has ever succeeded.** The three CLI runtimes have been executed for real against the installed versions (2.1.272 / 0.154.0 / 0.59.0) and their command lines are correct — each starts, is reached by the parser, and fails at the credential boundary (Codex: 401 from `api.openai.com`; Gemini: exit 41, "set an Auth method"; Claude: "Not logged in · Please run /login"). No API key exists on this machine and `provider_credentials` is empty, so this is a missing-credential blocker, not a defect. Store a key under **Credentials** or log a CLI in from a workspace terminal to get past it.
 2. **A collaborator can read the owner's provider key during a run.** Verified, not theoretical: the agent process runs as the same uid as every human shell in the container, so `grep -a ANTHROPIC_API_KEY /proc/<pid>/environ` works. See `SECURITY_MODEL.md` → Provider credentials for the demonstration and the three possible fixes. Until one is implemented, only share a workspace with people you would trust with the key attached to its tasks.
-3. **Deleting a task leaves its worktree and branch in the container.** `deleteTask` removes the database row only; `/home/dev/.notea/worktrees/<taskId>` and `notea/task/<taskId>` survive with nothing referencing them. Worktrees of *failed* tasks are kept on purpose (so "Run again" continues on the same branch) — this is specifically about deletion. The clean fix is a reaper on the worker tick that removes worktrees whose task id no longer exists; the web app has no path into the container today.
+3. ~~**Deleting a task leaves its worktree and branch in the container.**~~ **Resolved (session 5, D-038).** A worker-side reaper (`apps/worker/src/reaper.ts`, `WORKER_REAP_INTERVAL_MS` default 60 s) removes the worktree and branch of a deleted task (archiving the branch tip to `refs/notea/archive/<id>` first) and the merged branch of an integrated task, while keeping re-runnable and active tasks, in-use worktrees and `main`. Verified against the demo container: it reaped exactly the one leftover `done` branch and was idempotent. Failed tasks still keep their worktree for "Run again", by design.
 4. **No ESLint/Prettier** (D-018).
 5. **Image size** (Node + build tools + three CLIs); a slim variant is possible.
 6. **`fs.changed` covers API writes only**; terminal-side edits are caught by the etag check at save time, not proactively.

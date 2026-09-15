@@ -37,6 +37,15 @@ Actors: owner (trusted), invited collaborators (semi-trusted, shell access insid
 > This was tested inside the running workspace container and the environment of another process *is* readable. Blocking `term.input` on agent-owned sessions would not close it, and neither would masking the UI — `/proc` is the path. Treat "injected only into the run's session" as protection against *casual* exposure (it is not in a normal shell's environment, not in the UI, not in the database in plaintext), not as isolation from an editor who goes looking.
 >
 > Consequence for the current threat model: **give a workspace only to collaborators you would trust with the provider key you attach to its tasks.** Real fixes, in increasing order of cost: run agent CLIs as a second uid in the image with `hidepid` on `/proc`; run each agent task in its own short-lived container that mounts only the worktree; or move to an API-loop runtime where the key never leaves the worker process. The third is the direction `AGENT_SYSTEM.md` §3 already anticipates.
+>
+> **No incremental in-container mitigation exists (verified 2026-09-15).** The two cheapest candidates both need a capability the hardened container is built to deny, so neither can be added without undoing the hardening that makes the container safe against untrusted code:
+>
+> ```
+> mount -o remount,hidepid=2 /proc  ->  "must be superuser"   (CapEff = 0000…0000, no CAP_SYS_ADMIN)
+> setpriv --reuid=1001 --regid=1001 id  ->  "setresuid: Operation not permitted"  (NoNewPrivs=1, no CAP_SETUID)
+> ```
+>
+> Dropping to a second uid at container start needs `CAP_SETUID`/`CAP_SETGID`; `hidepid` needs `CAP_SYS_ADMIN` to remount `/proc`. `CapDrop: ALL` + `no-new-privileges` (D-009) removes both by design. The fix is therefore architectural — the image must be *built* to run the agent as a distinct uid (a second stage that adds the user and mounts `/proc` with `hidepid` at build/entry time under a controlled capability), or each task must run in its own container, or the key must never enter the container (API-loop runtime). This is a **pre-production blocker for sharing a workspace with anyone you would not trust with the key**, not something the running system can patch around. A related, lower-severity exposure: the per-workspace `NOTEA_AGENT_TOKEN` is in PID 1's and the daemon's `/proc/<pid>/environ` (the kernel snapshot from exec, which the agent cannot scrub), so any process in the container can read it and open a bridge connection as any identity; its blast radius is that one workspace, which a container shell already has.
 
 **Container ↔ container / control network.** Workspaces share `notea-workspaces`; Postgres must stay on a separate network in production (M2 compose).
 
