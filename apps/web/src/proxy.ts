@@ -4,7 +4,9 @@ import { authConfig } from './auth.config';
 
 const { auth } = NextAuth(authConfig);
 
-const PUBLIC_PREFIXES = ['/sign-in', '/api/auth'];
+// Static assets are excluded by the matcher below as well; listing them here keeps
+// the page working even if the matcher convention changes between Next versions.
+const PUBLIC_PREFIXES = ['/sign-in', '/api/auth', '/_next', '/favicon.ico'];
 
 /**
  * Redirects anonymous visitors to the sign-in page. This is a convenience gate
@@ -22,6 +24,6 @@ export const proxy = auth((request) => {
   return NextResponse.next();
 });
 
-export const proxyConfig = {
+export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };

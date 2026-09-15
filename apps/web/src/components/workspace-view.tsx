@@ -19,6 +19,11 @@ export interface WorkspaceViewProps {
   returnTo: string;
 }
 
+/** Deterministic (UTC, fixed locale) so server and client render identical markup. */
+function formatTimestamp(iso: string): string {
+  return new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(iso)) + ' UTC';
+}
+
 export function WorkspaceView(props: WorkspaceViewProps) {
   if (!props.running) {
     return (
@@ -122,7 +127,7 @@ function WorkspaceLayout({ workspaceId, role, members, events, currentUserId, re
               <li key={event.id} className="text-[#aab1bb]">
                 <span className="text-[#e6e9ee]">{event.type}</span>
                 <span className="block text-[10px] text-[#6f7782]">
-                  {event.actorKind} · {new Date(event.createdAt).toLocaleString()}
+                  {event.actorKind} · {formatTimestamp(event.createdAt)}
                 </span>
               </li>
             ))}

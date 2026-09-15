@@ -5,7 +5,8 @@ import type { AgentMessageOf, PresenceClient, TerminalSessionInfo } from '@notea
 import { WorkspaceClient, type ConnectionState } from '@notea/workspace-client';
 
 export interface WorkspaceSocketValue {
-  client: WorkspaceClient;
+  /** Null until the component has mounted in the browser. */
+  client: WorkspaceClient | null;
   state: ConnectionState;
   hello: AgentMessageOf<'hello'> | null;
   presence: PresenceClient[];
@@ -28,40 +29,52 @@ async function fetchConnectUrl(workspaceId: string): Promise<string> {
   return body.url;
 }
 
-/** Owns one WorkspaceClient per workspace page and mirrors its state into React. */
+/**
+ * Owns one WorkspaceClient per workspace page and mirrors its state into React.
+ * The client is created inside an effect so it never runs during server rendering
+ * (and so React's development double-mount closes and recreates it cleanly).
+ */
 export function WorkspaceSocketProvider({ workspaceId, children }: { workspaceId: string; children: ReactNode }) {
-  const client = useMemo(
-    () => new WorkspaceClient({ url: () => fetchConnectUrl(workspaceId), minBackoffMs: 1000, maxBackoffMs: 15_000 }),
-    [workspaceId],
-  );
-  const [state, setState] = useState<ConnectionState>(client.state);
+  const [client, setClient] = useState<WorkspaceClient | null>(null);
+  const [state, setState] = useState<ConnectionState>('connecting');
   const [hello, setHello] = useState<AgentMessageOf<'hello'> | null>(null);
   const [presence, setPresence] = useState<PresenceClient[]>([]);
   const [sessions, setSessions] = useState<TerminalSessionInfo[]>([]);
   const [lastClose, setLastClose] = useState<{ code?: number; reason?: string } | null>(null);
 
   useEffect(() => {
+    const instance = new WorkspaceClient({
+      url: () => fetchConnectUrl(workspaceId),
+      minBackoffMs: 1000,
+      maxBackoffMs: 15_000,
+    });
     const offs = [
-      client.onStateChange(({ state: next, code, reason }) => {
+      instance.onStateChange(({ state: next, code, reason }) => {
         setState(next);
         if (next !== 'open') setLastClose({ code, reason });
       }),
-      client.on('hello', (message) => {
+      instance.on('hello', (message) => {
         setHello(message);
         setPresence(message.clients);
         setSessions(message.sessions);
       }),
-      client.on('presence', (message) => setPresence(message.clients)),
-      client.on('term.opened', (message) =>
+      instance.on('presence', (message) => setPresence(message.clients)),
+      instance.on('term.opened', (message) =>
         setSessions((prev) => (prev.some((s) => s.id === message.session.id) ? prev : [...prev, message.session])),
       ),
-      client.on('term.exit', (message) => setSessions((prev) => prev.filter((s) => s.id !== message.sessionId))),
+      instance.on('term.exit', (message) => setSessions((prev) => prev.filter((s) => s.id !== message.sessionId))),
     ];
+    setClient(instance);
+    setState(instance.state);
     return () => {
       for (const off of offs) off();
-      client.close();
+      instance.close();
+      setClient(null);
+      setHello(null);
+      setPresence([]);
+      setSessions([]);
     };
-  }, [client]);
+  }, [workspaceId]);
 
   const value = useMemo(
     () => ({ client, state, hello, presence, sessions, lastClose }),

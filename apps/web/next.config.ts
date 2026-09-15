@@ -11,6 +11,11 @@ if (!process.env.DATABASE_URL && existsSync(rootEnv)) {
 }
 
 const nextConfig: NextConfig = {
+  // The repository root already carries AGENTS.md/CLAUDE.md for this project.
+  agentRules: false,
+  // Development is reached as 127.0.0.1 as well as localhost; without this Next
+  // blocks its dev/HMR resources cross-origin and the client never hydrates.
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
   // Workspace packages export TypeScript source; let Next compile them.
   transpilePackages: ['@notea/protocol', '@notea/db', '@notea/workspace-client'],
   // Native/Node-only server dependencies stay external to the server bundle.
