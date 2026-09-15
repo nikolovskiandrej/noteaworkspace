@@ -1,0 +1,23 @@
+{
+  "name": "@notea/workspace-client",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Protocol v1 client for browsers and Node (terminals, files, presence) with reconnect",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@notea/protocol": "0.0.1"
+  },
+  "devDependencies": {
+    "@notea/workspace-agent": "0.0.1"
+  }
+}

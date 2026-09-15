@@ -1,0 +1,24 @@
+# Development dependencies for the control plane. Start with:
+#   docker compose -p notea-dev -f infra/compose/docker-compose.dev.yml up -d
+# Postgres listens on 127.0.0.1:55432 (5432 is used by another project on the dev machine).
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: notea-dev-postgres
+    environment:
+      POSTGRES_USER: notea
+      POSTGRES_PASSWORD: notea
+      POSTGRES_DB: notea
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - notea-dev-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notea -d notea"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  notea-dev-postgres-data:
+    name: notea-dev-postgres-data
