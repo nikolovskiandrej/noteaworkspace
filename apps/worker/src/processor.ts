@@ -172,7 +172,7 @@ export async function runTask(deps: ProcessorDeps, task: AgentTask): Promise<voi
       model: task.provider && task.modelId ? { provider: task.provider as ProviderId, modelId: task.modelId } : null,
       credentialEnv: env,
       identity,
-      limits: { maxMinutes: task.maxMinutes, maxTurns: task.maxTurns ?? undefined },
+      limits: { maxMinutes: task.maxMinutes, maxBudgetUsd: task.maxBudgetUsd ?? undefined },
       command: task.command ?? undefined,
     };
     const handle = await runtime.start(ctx, connection.session);
@@ -264,22 +264,29 @@ const integrationMutex = new PerKeyMutex();
 export async function integrateApprovedTask(deps: ProcessorDeps, task: AgentTask): Promise<void> {
   const { db, log } = deps;
   const now = deps.now ?? (() => new Date());
-  // Cross-process safety: one worker per workspace at a time (in-process mutex below
-  // handles concurrency within this worker). If another worker holds the lease the
-  // task stays `approved` and is retried on a later tick.
-  if (!(await acquireIntegrationLease(db, task.workspaceId, deps.workerId, now()))) return;
 
   const [claimed] = await db
     .update(agentTasks)
     .set({ status: 'integrating', updatedAt: now() })
     .where(and(eq(agentTasks.id, task.id), eq(agentTasks.status, 'approved')))
     .returning();
-  if (!claimed) {
-    await releaseIntegrationLease(db, task.workspaceId, deps.workerId);
-    return;
-  }
+  if (!claimed) return;
 
   await integrationMutex.run(task.workspaceId, async () => {
+    // The lease is taken inside the mutex and released in the same scope. Acquiring it
+    // before the mutex was wrong: two approved tasks in one workspace both acquire it
+    // (the holder check passes for the same workerId), and when the first finishes its
+    // release clears the lease while the second is still waiting to integrate, leaving
+    // the second to touch the main tree with no cross-process lock held.
+    if (!(await acquireIntegrationLease(db, task.workspaceId, deps.workerId, now()))) {
+      // Another worker owns this workspace's main tree; hand the task back for a later tick.
+      await db
+        .update(agentTasks)
+        .set({ status: 'approved', updatedAt: now() })
+        .where(and(eq(agentTasks.id, task.id), eq(agentTasks.status, 'integrating')));
+      log.info('integration deferred; another worker holds the lease', { taskId: task.id });
+      return;
+    }
     const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.id, task.workspaceId) });
     const policy = policyOf(workspace ?? { coordinationPolicy: null });
     const baseBranch = task.baseBranch || policy.baseBranch;
@@ -344,11 +351,64 @@ export async function findApprovedTasks(db: Database, limit = 10): Promise<Agent
   return db.query.agentTasks.findMany({ where: eq(agentTasks.status, 'approved'), orderBy: asc(agentTasks.approvedAt), limit });
 }
 
-/** Number of runs this worker currently owns (for capacity checks). */
+/** Number of runs this worker currently owns, as recorded in the database (diagnostics). */
 export async function countOwnRunningRuns(db: Database, workerId: string): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(agentRuns)
     .where(and(eq(agentRuns.status, 'running'), eq(agentRuns.workerId, workerId)));
   return row?.count ?? 0;
+}
+
+/**
+ * In-process count of the runs this worker owns.
+ *
+ * The concurrency limit cannot be derived from the database: `runTask` writes its
+ * `agent_runs` row several round trips after the task is claimed, so a query would
+ * still report zero while the previous claims are starting up, and one tick would
+ * claim every queued task at once. Counting the promises this process is holding is
+ * both accurate and immediate, and it does not strand a restarted worker behind its
+ * own stale `running` rows.
+ */
+export class RunSlots {
+  private readonly active = new Set<Promise<unknown>>();
+
+  constructor(private readonly limit: number) {}
+
+  get size(): number {
+    return this.active.size;
+  }
+
+  get free(): number {
+    return Math.max(0, this.limit - this.active.size);
+  }
+
+  add(promise: Promise<unknown>): void {
+    this.active.add(promise);
+    void promise.catch(() => undefined).finally(() => this.active.delete(promise));
+  }
+
+  /** Waits for every tracked promise to settle (graceful shutdown). */
+  async drain(): Promise<void> {
+    await Promise.allSettled([...this.active]);
+  }
+}
+
+/**
+ * Claims queued tasks and starts them until this worker reaches its concurrency
+ * limit or nothing else is claimable. Returns the tasks it started.
+ */
+export async function startDueRuns(
+  deps: ProcessorDeps,
+  slots: RunSlots,
+  run: (task: AgentTask) => Promise<void>,
+): Promise<AgentTask[]> {
+  const started: AgentTask[] = [];
+  while (slots.free > 0) {
+    const task = await claimNextTask(deps);
+    if (!task) break;
+    slots.add(run(task));
+    started.push(task);
+  }
+  return started;
 }

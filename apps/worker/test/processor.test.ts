@@ -18,7 +18,8 @@ import {
   workspaces,
   type DatabaseHandle,
 } from '@notea/db';
-import { claimNextTask, integrateApprovedTask, recoverStaleRuns, runTask, type ProcessorDeps } from '../src/processor';
+import { RunSlots, claimNextTask, integrateApprovedTask, recoverStaleRuns, runTask, startDueRuns, type ProcessorDeps } from '../src/processor';
+import { acquireIntegrationLease, integrationLeaseHolder } from '../src/integration-lease';
 
 const url = process.env.DATABASE_URL;
 const describeDb = url ? describe : describe.skip;
@@ -30,6 +31,7 @@ function fakeSession(): WorkspaceSession {
     onTerminalOutput: () => () => undefined,
     onTerminalExit: () => () => undefined,
     writeHostFile: async () => undefined,
+    ensureHostFile: async () => undefined,
   };
 }
 
@@ -242,5 +244,70 @@ describeDb('task processor', () => {
     expect(after?.status).toBe('cancelled');
     const run = await handle.db.query.agentRuns.findFirst({ where: eq(agentRuns.taskId, task.id) });
     expect(run?.status).toBe('cancelled');
+  });
+
+  it('never starts more concurrent runs than the limit, even before any run row exists', async () => {
+    runner = scriptedGit();
+    const d = deps(fakeRuntime([]));
+    // Distinct scopes so the workspace's `block` overlap policy is not what limits us.
+    for (const name of ['a', 'b', 'c', 'd', 'e']) {
+      await createTask({ title: `Parallel ${name} ${suffix}`, scope: [`${name}/**`] });
+    }
+
+    // Runs that never settle: `runTask` normally writes its `agent_runs` row several
+    // round trips after the claim, so a database-backed count would still read zero
+    // here and let every queued task be claimed at once.
+    const pending: Array<() => void> = [];
+    const slots = new RunSlots(2);
+    const started = await startDueRuns(d, slots, () => new Promise<void>((resolve) => pending.push(resolve)));
+
+    expect(started).toHaveLength(2);
+    expect(slots.size).toBe(2);
+    expect(slots.free).toBe(0);
+    const running = await handle.db.query.agentTasks.findMany({ where: eq(agentTasks.workspaceId, workspaceId) });
+    expect(running.filter((t) => t.status === 'running')).toHaveLength(2);
+    expect(running.filter((t) => t.status === 'queued')).toHaveLength(3);
+
+    // Finishing one run frees exactly one slot for the next tick.
+    pending.pop()?.();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(slots.free).toBe(1);
+    const more = await startDueRuns(d, slots, () => new Promise<void>((resolve) => pending.push(resolve)));
+    expect(more).toHaveLength(1);
+
+    for (const resolve of pending) resolve();
+  });
+
+  it('defers integration and restores the task when another worker holds the lease', async () => {
+    runner = scriptedGit();
+    const d = deps(fakeRuntime([]));
+    const task = await createTask({ title: `Leased ${suffix}` });
+    await handle.db
+      .update(agentTasks)
+      .set({ status: 'approved', branch: 'notea/task/x', worktreePath: '/home/dev/.notea/worktrees/x' })
+      .where(eq(agentTasks.id, task.id));
+
+    expect(await acquireIntegrationLease(handle.db, workspaceId, 'other-worker')).toBe(true);
+    await integrateApprovedTask(d, (await handle.db.query.agentTasks.findFirst({ where: eq(agentTasks.id, task.id) }))!);
+
+    // Handed back for a later tick rather than integrated without the cross-process lock.
+    expect((await handle.db.query.agentTasks.findFirst({ where: eq(agentTasks.id, task.id) }))?.status).toBe('approved');
+    expect((await integrationLeaseHolder(handle.db, workspaceId))?.workerId).toBe('other-worker');
+
+    await handle.db.update(workspaces).set({ integrationLockedBy: null, integrationLockedUntil: null }).where(eq(workspaces.id, workspaceId));
+  });
+
+  it('releases the integration lease once integration finishes', async () => {
+    runner = scriptedGit();
+    const d = deps(fakeRuntime([]));
+    const task = await createTask({ title: `Lease release ${suffix}` });
+    await handle.db
+      .update(agentTasks)
+      .set({ status: 'approved', branch: 'notea/task/y', worktreePath: '/home/dev/.notea/worktrees/y' })
+      .where(eq(agentTasks.id, task.id));
+
+    await integrateApprovedTask(d, (await handle.db.query.agentTasks.findFirst({ where: eq(agentTasks.id, task.id) }))!);
+
+    expect(await integrationLeaseHolder(handle.db, workspaceId)).toBeNull();
   });
 });

@@ -4,7 +4,7 @@ import { createRuntimeRegistry, parseCredentialsKey } from '@notea/agents';
 import { createDatabase } from '@notea/db';
 import { OrchestratorClient } from '@notea/workspace-client';
 import { loadConfig } from './config';
-import { claimNextTask, countOwnRunningRuns, findApprovedTasks, integrateApprovedTask, recoverStaleRuns, runTask, type ProcessorDeps } from './processor';
+import { RunSlots, findApprovedTasks, integrateApprovedTask, recoverStaleRuns, runTask, startDueRuns, type ProcessorDeps } from './processor';
 import { createWorkspaceConnector } from './workspace-connection';
 
 for (const candidate of [path.resolve(process.cwd(), '.env'), path.resolve(process.cwd(), '../../.env')]) {
@@ -44,20 +44,21 @@ async function main(): Promise<void> {
   log.info('worker starting', { workerId: config.WORKER_ID, maxConcurrentRuns: config.WORKER_MAX_CONCURRENT_RUNS, credentials: !!deps.credentialsKey });
 
   const inFlight = new Set<Promise<void>>();
+  const slots = new RunSlots(config.WORKER_MAX_CONCURRENT_RUNS);
   let stopping = false;
   const track = (promise: Promise<void>) => {
     inFlight.add(promise);
-    void promise.finally(() => inFlight.delete(promise));
+    void promise.catch(() => undefined).finally(() => inFlight.delete(promise));
   };
 
   const tick = async () => {
     await recoverStaleRuns(deps);
     for (const task of await findApprovedTasks(handle.db)) track(integrateApprovedTask(deps, task));
-    while ((await countOwnRunningRuns(handle.db, config.WORKER_ID)) < config.WORKER_MAX_CONCURRENT_RUNS) {
-      const task = await claimNextTask(deps);
-      if (!task) break;
-      track(runTask(deps, task));
-    }
+    await startDueRuns(deps, slots, (task) => {
+      const promise = runTask(deps, task);
+      track(promise);
+      return promise;
+    });
   };
 
   while (!stopping) {
@@ -71,8 +72,9 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string) => {
     stopping = true;
-    log.info('shutting down', { signal, inFlight: inFlight.size });
+    log.info('shutting down', { signal, inFlight: inFlight.size, runs: slots.size });
     await Promise.allSettled([...inFlight]);
+    await slots.drain();
     await handle.close();
     process.exit(0);
   };

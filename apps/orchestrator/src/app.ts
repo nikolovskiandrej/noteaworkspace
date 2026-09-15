@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { OrchestratorErrorBody } from '@notea/protocol';
 import type { WorkspaceRuntimeApi } from './docker/workspace-runtime';
@@ -17,8 +17,41 @@ export interface AppDeps {
   devConsole?: boolean;
 }
 
+/**
+ * Strips the query string from a URL before it reaches a log.
+ *
+ * Browsers and the worker open the bridge as `/ws/workspaces/<id>?token=<connect JWT>`,
+ * and Fastify's default request serializer logs `req.url` verbatim — which would write
+ * a live workspace credential (owner role included) into the orchestrator's log.
+ * SECURITY_MODEL.md §3: never log tokens; logs carry ids only.
+ */
+export function redactQuery(url: string): string {
+  const query = url.indexOf('?');
+  return query === -1 ? url : `${url.slice(0, query)}?<redacted>`;
+}
+
+/**
+ * Applies {@link redactQuery} to the request serializer. Applied last so a caller's
+ * serializers cannot accidentally restore full-URL logging; a ready-made logger
+ * instance is passed through untouched because it owns its own serializers.
+ */
+function withRedactedUrls(logger: AppDeps['logger']): FastifyServerOptions['logger'] {
+  if (typeof logger !== 'object' || logger === null || 'child' in logger) return logger ?? false;
+  const options = logger as Record<string, unknown>;
+  const serializers = {
+    ...((options.serializers as Record<string, unknown> | undefined) ?? {}),
+    req: (request: FastifyRequest) => ({
+      method: request.method,
+      url: redactQuery(request.url),
+      host: request.host,
+      remoteAddress: request.ip,
+    }),
+  };
+  return { ...options, serializers } as FastifyServerOptions['logger'];
+}
+
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: deps.logger ?? false });
+  const app = Fastify({ logger: withRedactedUrls(deps.logger) });
 
   app.setErrorHandler((err: unknown, _request, reply) => {
     if (err instanceof RuntimeError) {
