@@ -106,5 +106,10 @@ Format: context → options → decision → why → revisit when. Numbers are s
 ### D-020 Terminal replay uses raw scrollback bytes
 **Why.** Simple and good enough for shells. Exact screen reconstruction (headless xterm serialisation) is a listed improvement.
 
+### D-022 A development-only browser console lives in the orchestrator
+**Decision.** `GET /dev/console` (enabled only with `DEV_CONSOLE=true`) serves a static xterm.js page that creates/starts a workspace and embeds a one-hour connect token.
+**Why.** Proves the browser path before the Next.js app exists, gives the M1 terminal component a working reference (attach/replay, resize, reconnect), and costs ~150 lines. It must never be enabled on a reachable host (no auth, mints tokens).
+**Revisit.** Delete it once `apps/web` has a terminal, or keep it as an operator debugging tool behind the API key.
+
 ### D-021 npm install scripts are allow-listed explicitly
 **Context.** npm 11.16+ blocks package install scripts unless allow-listed. `esbuild` and `node-pty` are approved in the root `package.json`; `node-pty` is approved in the image's `package.json`. `ssh2` and `protobufjs` (dockerode transitive) are deliberately not approved; they work without their optional native builds.

@@ -4,6 +4,7 @@ import type { OrchestratorErrorBody } from '@notea/protocol';
 import type { WorkspaceRuntimeApi } from './docker/workspace-runtime';
 import { RuntimeError } from './errors';
 import { registerBridge } from './routes/bridge';
+import { registerDevConsole } from './routes/dev-console';
 import { registerWorkspaceRoutes } from './routes/workspaces';
 import type { TokenService } from './tokens';
 
@@ -12,6 +13,8 @@ export interface AppDeps {
   tokens: TokenService;
   apiKey: string;
   logger?: FastifyServerOptions['logger'];
+  /** Serve the browser dev console at /dev/console (development only). */
+  devConsole?: boolean;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -45,6 +48,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(async (scoped) => {
     await registerWorkspaceRoutes(scoped, { runtime: deps.runtime, tokens: deps.tokens, apiKey: deps.apiKey });
   });
+  if (deps.devConsole) {
+    registerDevConsole(app, { runtime: deps.runtime, tokens: deps.tokens });
+    app.log.warn('dev console enabled at /dev/console; never expose this host');
+  }
 
   return app;
 }

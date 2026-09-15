@@ -22,6 +22,7 @@ notea-workspace/
 │   ├── src/docker/workspace-runtime.ts  dockerode lifecycle, endpoint resolution, agent readiness
 │   ├── src/routes/workspaces.ts  REST (API-key guarded)
 │   ├── src/routes/bridge.ts      /ws/workspaces/:id bridge
+│   ├── src/routes/dev-console.ts /dev/console browser terminal (DEV_CONSOLE=true only; reference client)
 │   ├── src/app.ts, src/index.ts  app factory; entry point (loads .env, connects Docker)
 │   └── test/                     spec, tokens, bridge (in-process agent), docker.e2e (gated)
 ├── packages/protocol/            protocol v1 + orchestrator API types            [implemented, tested]
@@ -47,6 +48,7 @@ Not present yet: `apps/web`, `packages/db`, `packages/agents`, compose files, ES
 | `npm run build:image` | OK, `notea/workspace:dev` 1.06 GB, `node-pty ok` printed during build |
 | `npm run test:e2e -w @notea/orchestrator` | **OK** (see below) |
 | `npx tsx src/index.ts` in `apps/orchestrator` with env vars | starts, `/healthz` OK, API key enforced, connect token issued (smoke test) |
+| Dev console (`DEV_CONSOLE=true`, `http://127.0.0.1:4100/dev/console?workspaceId=demo`) | **verified in Chrome**: page creates/starts the workspace, xterm.js connects through the bridge, `echo … && whoami && pwd && node -v && git --version` ran in the container and printed `dev`, `/home/dev/project`, `v24.21.0`, `git version 2.39.5`; reloading the page re-attaches to the existing session and replays scrollback |
 
 What the e2e test proved: `POST`-equivalent create → container + volume + network created → agent healthy in ≈1–2 s → connect token accepted by the bridge → `hello` received with `projectDir=/home/dev/project` → `term.create` → typed `echo …; whoami; pwd; echo …` → output streamed back containing the marker, `dev` and `/home/dev/project` → `fs.write` → stop → start → new connection sees zero sessions → `fs.read` returns the persisted file → remove with volume deletion → no leftovers.
 

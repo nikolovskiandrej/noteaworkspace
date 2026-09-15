@@ -87,7 +87,7 @@ None technical. Practical: Docker Desktop must be running for image build and e2
 
 ## 21. What has been tested
 
-Unit + in-process integration (55 tests) on Windows; Docker e2e on Windows with Docker Desktop (Linux containers): create, terminal I/O, file write, stop/start persistence, read, delete. Orchestrator entry point smoke-tested as a live server (`/healthz`, API key, connect token).
+Unit + in-process integration (55 tests) on Windows; Docker e2e on Windows with Docker Desktop (Linux containers): create, terminal I/O, file write, stop/start persistence, read, delete. Orchestrator entry point smoke-tested as a live server (`/healthz`, API key, connect token). The browser path was verified manually in Chrome through the dev console (`DEV_CONSOLE=true`, `/dev/console?workspaceId=demo`): xterm.js terminal over the real bridge, commands executed in the container, reload re-attaches with scrollback replay. Its client script (`apps/orchestrator/src/routes/dev-console.ts`) is the reference for the M1 terminal component.
 
 ## 22. What has NOT been tested
 
@@ -151,6 +151,7 @@ Environment variables: see `.env.example` (orchestrator: `PORT`, `HOST`, `ORCHES
 | Build workspace image | `npm run build:image` |
 | Docker e2e | `npm run test:e2e -w @notea/orchestrator` |
 | Run orchestrator (dev, watch) | `npm run dev:orchestrator` |
+| Browser terminal without the web app | set `DEV_CONSOLE=true` in `.env`, run the orchestrator, open `http://127.0.0.1:4100/dev/console?workspaceId=demo` |
 | Manual API check | see `README.md` (curl examples) |
 
 ## 30. Unresolved architectural questions

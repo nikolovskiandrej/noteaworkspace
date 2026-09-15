@@ -34,6 +34,9 @@ const EnvSchema = z.object({
 
   CONNECT_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   CONNECT_TOKEN_MAX_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
+
+  /** Serve a browser terminal at /dev/console. Development on localhost only. */
+  DEV_CONSOLE: z.enum(['true', 'false']).default('false'),
 });
 
 export interface OrchestratorConfig {
@@ -51,6 +54,7 @@ export interface OrchestratorConfig {
   defaultResources: { cpus: number; memoryMb: number; pidsLimit: number };
   connectTokenTtlSeconds: number;
   connectTokenMaxTtlSeconds: number;
+  devConsole: boolean;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): OrchestratorConfig {
@@ -80,5 +84,6 @@ export function loadConfig(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = p
     },
     connectTokenTtlSeconds: e.CONNECT_TOKEN_TTL_SECONDS,
     connectTokenMaxTtlSeconds: e.CONNECT_TOKEN_MAX_TTL_SECONDS,
+    devConsole: e.DEV_CONSOLE === 'true',
   };
 }

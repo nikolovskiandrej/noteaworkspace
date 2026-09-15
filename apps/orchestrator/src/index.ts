@@ -40,7 +40,13 @@ async function main(): Promise<void> {
       warn: (obj, msg) => app?.log.warn(obj, msg),
     },
   });
-  app = await buildApp({ runtime, tokens, apiKey: config.apiKey, logger: { level: config.logLevel } });
+  app = await buildApp({
+    runtime,
+    tokens,
+    apiKey: config.apiKey,
+    logger: { level: config.logLevel },
+    devConsole: config.devConsole,
+  });
 
   const dockerVersion = await docker.version().catch((err: Error) => {
     throw new Error(`cannot reach Docker: ${err.message}`);

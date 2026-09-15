@@ -48,6 +48,10 @@ Then open `ws://127.0.0.1:4100/ws/workspaces/demo?token=<token>` with any WebSoc
 `{"type":"term.create","reqId":"1","cols":80,"rows":24}` followed by `{"type":"term.input","sessionId":"<id>","data":"ls\r"}`.
 The protocol is documented in `packages/protocol/src/messages.ts`.
 
+Or use the browser dev console (development on localhost only): set `DEV_CONSOLE=true` in `.env`, start the
+orchestrator and open `http://127.0.0.1:4100/dev/console?workspaceId=demo`. It creates the workspace if needed and
+mounts an xterm.js terminal on the real bridge.
+
 ## Documentation
 
 | File | Purpose |
