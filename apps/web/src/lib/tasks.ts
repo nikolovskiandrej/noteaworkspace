@@ -43,6 +43,7 @@ export interface CreateTaskInput {
   command?: string;
   agentName?: string;
   maxMinutes?: number;
+  maxBudgetUsd?: number;
 }
 
 export function parseScope(raw: string | undefined): string[] {
@@ -92,6 +93,7 @@ export async function createTask(db: Database, userId: string, workspaceId: stri
   const command = input.command?.trim() || null;
   if (runtime.id === 'generic-cli' && !command) throw new Error('the generic runtime needs a command');
   const maxMinutes = Math.min(Math.max(Math.round(input.maxMinutes ?? 30), 1), 240);
+  const maxBudgetUsd = input.maxBudgetUsd && input.maxBudgetUsd > 0 ? Math.min(input.maxBudgetUsd, 1000) : null;
 
   const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId), columns: { coordinationPolicy: true } });
   const policy = { ...DEFAULT_COORDINATION_POLICY, ...(workspace?.coordinationPolicy ?? {}) };
@@ -112,6 +114,7 @@ export async function createTask(db: Database, userId: string, workspaceId: stri
       baseBranch: policy.baseBranch,
       status: 'queued',
       maxMinutes,
+      maxBudgetUsd,
       createdBy: userId,
     })
     .returning();

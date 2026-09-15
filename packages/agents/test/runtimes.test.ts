@@ -7,6 +7,9 @@ import { AgentHub, FsService, ProcessManager, SessionManager, createAgentServer,
 import { fakeProcessFactory, fakePtyFactory, type FakeProcess, type FakePty } from '@notea/workspace-agent/testing';
 import { WorkspaceClient } from '@notea/workspace-client';
 import { ClaudeCodeRuntime, parseClaudeStreamLine } from '../src/runtimes/claude-code';
+import { CodexRuntime, parseCodexLine } from '../src/runtimes/codex';
+import { GeminiRuntime } from '../src/runtimes/gemini';
+import { stripAnsi } from '../src/terminal-run';
 import { createRuntimeRegistry } from '../src/runtimes/index';
 import type { AgentRunContext, AgentRunEvent } from '../src/types';
 import { ClientWorkspaceSession } from '../src/workspace-session';
@@ -74,7 +77,7 @@ const ctx: AgentRunContext = {
   model: { provider: 'anthropic', modelId: 'claude-sonnet-5' },
   credentialEnv: { ANTHROPIC_API_KEY: 'sk-test' },
   identity,
-  limits: { maxMinutes: 5, maxTurns: 20 },
+  limits: { maxMinutes: 5, maxBudgetUsd: 2.5 },
 };
 
 describe('parseClaudeStreamLine', () => {
@@ -99,9 +102,42 @@ describe('parseClaudeStreamLine', () => {
       { type: 'usage', inputTokens: 10, outputTokens: 5, costUsd: 0.12 },
       { type: 'finished', outcome: 'completed', summary: 'Done.' },
     ]);
+    // Authentication failures come back as success-shaped results flagged is_error.
+    expect(parseClaudeStreamLine(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login' }))).toMatchObject([
+      { type: 'finished', outcome: 'failed', summary: 'Not logged in · Please run /login' },
+    ]);
+    expect(parseClaudeStreamLine('[?25h')).toEqual([]);
+    expect(stripAnsi('[2m2026[0m [31mERROR[0m x')).toBe('2026 ERROR x');
     expect(parseClaudeStreamLine('plain text line')).toMatchObject([{ type: 'log', text: 'plain text line' }]);
     expect(parseClaudeStreamLine('{not json')).toMatchObject([{ type: 'log' }]);
     expect(parseClaudeStreamLine('')).toEqual([]);
+  });
+});
+
+describe('CodexRuntime', () => {
+  it('builds a headless command line and parses codex JSONL', () => {
+    const runtime = new CodexRuntime();
+    expect(runtime.buildCommandLine({ ...ctx, model: { provider: 'openai', modelId: 'gpt-5-codex' } }, '/b.md')).toBe(
+      `cd '/home/dev/.notea/worktrees/t1' && codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -m 'gpt-5-codex' "$(cat '/b.md')" < /dev/null`,
+    );
+    expect(runtime.supports({ provider: 'anthropic', modelId: 'x' })).toBe(false);
+    expect(parseCodexLine('{"type":"thread.started","thread_id":"t"}')).toMatchObject([{ type: 'log', level: 'debug' }]);
+    expect(parseCodexLine('{"type":"item.completed","item":{"type":"agent_message","text":"Done"}}')).toMatchObject([{ type: 'message', text: 'Done' }]);
+    expect(parseCodexLine('{"type":"item.started","item":{"type":"command_execution","command":"npm test"}}')).toMatchObject([{ type: 'tool_call', name: 'shell' }]);
+    expect(parseCodexLine('{"type":"item.completed","item":{"type":"file_change","changes":[{"path":"src/a.ts","kind":"update"}]}}')).toMatchObject([{ type: 'file_changed', path: 'src/a.ts' }]);
+    expect(parseCodexLine('{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":7}}')).toMatchObject([{ type: 'usage', inputTokens: 5, outputTokens: 7 }]);
+    expect(parseCodexLine('{"type":"error","message":"401"}')).toMatchObject([{ type: 'log', level: 'error', text: '401' }]);
+    expect(parseCodexLine('2026-09-15T16:56:56Z ERROR codex_api: failed')).toMatchObject([{ type: 'log', level: 'error' }]);
+  });
+});
+
+describe('GeminiRuntime', () => {
+  it('builds a headless command line', () => {
+    const runtime = new GeminiRuntime();
+    expect(runtime.buildCommandLine({ ...ctx, model: { provider: 'google', modelId: 'gemini-2.5-pro' } }, '/b.md')).toBe(
+      `cd '/home/dev/.notea/worktrees/t1' && gemini --approval-mode yolo -m 'gemini-2.5-pro' -p "$(cat '/b.md')" < /dev/null`,
+    );
+    expect(runtime.supports({ provider: 'openai', modelId: 'x' })).toBe(false);
   });
 });
 
@@ -110,7 +146,7 @@ describe('ClaudeCodeRuntime', () => {
     const runtime = new ClaudeCodeRuntime();
     const command = runtime.buildCommandLine(ctx, '/home/dev/.notea/runs/r1/brief.md');
     expect(command).toBe(
-      `cd '/home/dev/.notea/worktrees/t1' && claude -p "$(cat '/home/dev/.notea/runs/r1/brief.md')" --output-format stream-json --verbose --model 'claude-sonnet-5' --max-turns 20 --dangerously-skip-permissions`,
+      `cd '/home/dev/.notea/worktrees/t1' && claude -p "$(cat '/home/dev/.notea/runs/r1/brief.md')" --output-format stream-json --verbose --model 'claude-sonnet-5' --max-budget-usd 2.5 --dangerously-skip-permissions < /dev/null`,
     );
     expect(new ClaudeCodeRuntime({ permissionMode: 'acceptEdits' }).buildCommandLine({ ...ctx, model: null, limits: { maxMinutes: 1 } }, '/b')).toContain(
       '--permission-mode acceptEdits',
@@ -152,6 +188,52 @@ describe('ClaudeCodeRuntime', () => {
 
     expect(collected.map((e) => e.type)).toEqual(['started', 'log', 'message', 'usage', 'finished', 'log']);
     expect(collected.find((e) => e.type === 'finished')).toMatchObject({ outcome: 'completed', summary: 'All done' });
+    client.close();
+  });
+
+  /**
+   * Records captured from claude-code 2.1.272 running headless without a credential
+   * on 2026-09-15. The CLI reports the failure as a *success-shaped* result carrying
+   * `is_error: true`, then exits 1 — the shape that previously made the run land in
+   * `needs_review` as if the agent had done the work.
+   */
+  it('reports an unauthenticated run as failed and keeps the CLI explanation', async () => {
+    const client = new WorkspaceClient({ url: `ws://127.0.0.1:${port}/ws?token=${TOKEN}`, WebSocketImpl: identifyingWebSocket() });
+    await client.waitForHello();
+    const runtime = new ClaudeCodeRuntime();
+
+    const startPromise = runtime.start(ctx, new ClientWorkspaceSession(client));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    procs[0]?.emitExit(0);
+    const handle = await startPromise;
+
+    const collected: AgentRunEvent[] = [];
+    const consume = (async () => {
+      for await (const event of handle.events) collected.push(event);
+    })();
+
+    const notLoggedIn = 'Not logged in · Please run /login';
+    ptys[0]?.emitData(JSON.stringify({ type: 'system', subtype: 'init' }) + '\r\n');
+    ptys[0]?.emitData(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: notLoggedIn }] } }) + '\r\n');
+    ptys[0]?.emitData(
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: true,
+        result: notLoggedIn,
+        total_cost_usd: 0,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      }) + '\r\n',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    ptys[0]?.emitExit(1);
+    await consume;
+
+    const finished = collected.filter((e) => e.type === 'finished');
+    // The result record fails the run, and the non-zero exit confirms it.
+    expect(finished[0]).toMatchObject({ outcome: 'failed', summary: notLoggedIn });
+    // The worker keeps the last finished event, so that one must carry the reason too.
+    expect(finished.at(-1)).toMatchObject({ outcome: 'failed', exitCode: 1, summary: notLoggedIn });
     client.close();
   });
 

@@ -14,6 +14,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  real,
   text,
   timestamp,
   uuid,
@@ -181,7 +182,10 @@ export const agentTasks = pgTable(
     worktreePath: text('worktree_path'),
     status: taskStatus('status').notNull().default('draft'),
     maxMinutes: integer('max_minutes').notNull().default(30),
+    /** Unused since claude-code 2.1 dropped --max-turns; kept for compatibility. */
     maxTurns: integer('max_turns'),
+    /** Spend cap passed to runtimes that support it (Claude Code `--max-budget-usd`). */
+    maxBudgetUsd: real('max_budget_usd'),
     /** Final summary from the last run (agent's own words). */
     summary: text('summary'),
     diffStat: text('diff_stat'),

@@ -1,5 +1,5 @@
 import { shellQuote } from '../command-runner';
-import { now, startTerminalRun } from '../terminal-run';
+import { now, startTerminalRun, stripAnsi } from '../terminal-run';
 import type { AgentRunContext, AgentRunEvent, AgentRunHandle, AgentRuntime, ModelRef, WorkspaceSession } from '../types';
 
 export const CLAUDE_CODE_TOOLS_THAT_WRITE = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -17,8 +17,10 @@ export interface ClaudeCodeRuntimeOptions {
 
 /**
  * Claude Code CLI in headless mode (`claude -p … --output-format stream-json`).
- * The JSON-lines protocol is parsed defensively: unknown records become log events
- * so a CLI upgrade degrades to "less structure", not failure.
+ * Flags verified against claude-code 2.1.272 (`--max-budget-usd` exists, there is
+ * no `--max-turns`). The JSON-lines protocol is parsed defensively: unknown records
+ * become log events so a CLI upgrade degrades to "less structure", not failure.
+ * stdin is redirected from /dev/null so the CLI never waits for terminal input.
  */
 export class ClaudeCodeRuntime implements AgentRuntime {
   readonly id = 'claude-code-cli' as const;
@@ -35,10 +37,10 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     const binary = this.options.binary ?? 'claude';
     const flags = ['-p', `"$(cat ${shellQuote(briefPath)})"`, '--output-format', 'stream-json', '--verbose'];
     if (ctx.model) flags.push('--model', shellQuote(ctx.model.modelId));
-    if (ctx.limits.maxTurns) flags.push('--max-turns', String(ctx.limits.maxTurns));
+    if (ctx.limits.maxBudgetUsd && ctx.limits.maxBudgetUsd > 0) flags.push('--max-budget-usd', String(ctx.limits.maxBudgetUsd));
     if ((this.options.permissionMode ?? 'bypass') === 'bypass') flags.push('--dangerously-skip-permissions');
     else flags.push('--permission-mode', 'acceptEdits');
-    return `cd ${shellQuote(ctx.worktreePath)} && ${binary} ${flags.join(' ')}`;
+    return `cd ${shellQuote(ctx.worktreePath)} && ${binary} ${flags.join(' ')} < /dev/null`;
   }
 
   async start(ctx: AgentRunContext, session: WorkspaceSession): Promise<AgentRunHandle> {
@@ -53,14 +55,21 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       maxMinutes: ctx.limits.maxMinutes,
       parseLine: parseClaudeStreamLine,
       onExit: (exitCode, state) => {
-        if (state.sawFinished) {
+        if (state.sawFinished && exitCode === 0) {
           // The `result` record already produced the finished event; emit a log only.
           return { type: 'log', level: 'debug', text: `process exited with ${exitCode}`, at: now() };
+        }
+        if (state.sawFinished) {
+          // A non-zero exit after a result record (e.g. "Not logged in" reported as a
+          // success-shaped result) overrides the earlier outcome. Keep that record's
+          // summary: the worker stores the last finished event, and without this the
+          // run would surface as a bare failure with no reason.
+          return { type: 'finished', outcome: state.cancelled ? 'cancelled' : state.timedOut ? 'timeout' : 'failed', summary: state.summary, exitCode, at: now() };
         }
         return {
           type: 'finished',
           outcome: state.cancelled ? 'cancelled' : state.timedOut ? 'timeout' : exitCode === 0 ? 'completed' : 'failed',
-          summary: null,
+          summary: state.summary,
           exitCode,
           at: now(),
         };
@@ -78,7 +87,7 @@ interface ContentBlock {
 
 /** Parses one line of Claude Code stream-json output into run events. */
 export function parseClaudeStreamLine(line: string): AgentRunEvent[] {
-  const trimmed = line.trim();
+  const trimmed = stripAnsi(line).trim();
   if (!trimmed) return [];
   if (!trimmed.startsWith('{')) return [{ type: 'log', level: 'info', text: trimmed, at: now() }];
   let record: Record<string, unknown>;
@@ -113,13 +122,14 @@ export function parseClaudeStreamLine(line: string): AgentRunEvent[] {
     const usage = record.usage as { input_tokens?: number; output_tokens?: number } | undefined;
     const cost = typeof record.total_cost_usd === 'number' ? record.total_cost_usd : null;
     const subtype = typeof record.subtype === 'string' ? record.subtype : 'unknown';
+    const isError = record.is_error === true;
     const events: AgentRunEvent[] = [];
     if (usage || cost !== null) {
       events.push({ type: 'usage', inputTokens: usage?.input_tokens ?? 0, outputTokens: usage?.output_tokens ?? 0, costUsd: cost, at });
     }
     events.push({
       type: 'finished',
-      outcome: subtype === 'success' ? 'completed' : 'failed',
+      outcome: subtype === 'success' && !isError ? 'completed' : 'failed',
       summary: typeof record.result === 'string' ? record.result : null,
       exitCode: null,
       at,

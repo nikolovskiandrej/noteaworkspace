@@ -161,6 +161,7 @@ export async function createTaskAction(formData: FormData): Promise<void> {
       command: field(formData, 'command') || undefined,
       agentName: field(formData, 'agentName') || undefined,
       maxMinutes: Number(field(formData, 'maxMinutes') || 30),
+      maxBudgetUsd: field(formData, 'maxBudgetUsd') ? Number(field(formData, 'maxBudgetUsd')) : undefined,
     });
   } catch (err) {
     withError(returnTo, err);

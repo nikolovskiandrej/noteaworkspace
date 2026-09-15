@@ -38,9 +38,18 @@ export class ClientWorkspaceSession implements WorkspaceSession {
 
   /** Writes via a shell so paths outside the project directory (HOME) are allowed. */
   async writeHostFile(path: string, content: string): Promise<void> {
+    await this.write(path, content, false);
+  }
+
+  async ensureHostFile(path: string, content: string): Promise<void> {
+    await this.write(path, content, true);
+  }
+
+  private async write(path: string, content: string, onlyIfMissing: boolean): Promise<void> {
     const dir = path.slice(0, path.lastIndexOf('/')) || '/';
+    const guard = onlyIfMissing ? `if [ -e ${shellQuote(path)} ]; then cat > /dev/null; exit 0; fi; ` : '';
     const result = await this.client.runExec({
-      command: `mkdir -p ${shellQuote(dir)} && cat > ${shellQuote(path)}`,
+      command: `mkdir -p ${shellQuote(dir)} && ${guard}cat > ${shellQuote(path)}`,
       shell: true,
       timeoutMs: 30_000,
       stdin: content,

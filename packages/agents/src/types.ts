@@ -40,7 +40,8 @@ export interface AgentRunContext {
   /** Injected into the agent's session only (e.g. ANTHROPIC_API_KEY). */
   credentialEnv: Record<string, string>;
   identity: ClientIdentity;
-  limits: { maxMinutes: number; maxTurns?: number };
+  /** Wall-clock and spend limits; runtimes pass what their CLI supports. */
+  limits: { maxMinutes: number; maxBudgetUsd?: number };
   /** For `generic-cli`: the command line to run in the worktree. */
   command?: string;
 }
@@ -80,6 +81,8 @@ export interface WorkspaceSession {
   onTerminalExit(sessionId: string, listener: (exitCode: number | null) => void): () => void;
   /** Writes a file outside the project (e.g. the brief) via a shell; returns nothing. */
   writeHostFile(path: string, content: string): Promise<void>;
+  /** Writes the file only if it does not exist yet (first-run defaults such as CLI settings). */
+  ensureHostFile(path: string, content: string): Promise<void>;
 }
 
 export interface AgentRuntime {

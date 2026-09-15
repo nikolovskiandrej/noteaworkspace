@@ -185,6 +185,7 @@ export function TasksPanel({ workspaceId, role, returnTo, tasks, runtimes, model
           <div className="flex gap-2">
             <input name="agentName" placeholder="agent name (optional)" className="flex-1 rounded border border-[#2b313b] bg-[#0e1014] px-2 py-1" />
             <input name="maxMinutes" type="number" min={1} max={240} defaultValue={30} title="max minutes" className="w-20 rounded border border-[#2b313b] bg-[#0e1014] px-2 py-1" />
+            <input name="maxBudgetUsd" type="number" min={0} step={0.5} placeholder="$ cap" title="max spend in USD (Claude Code)" className="w-20 rounded border border-[#2b313b] bg-[#0e1014] px-2 py-1" />
           </div>
           <button className="rounded bg-emerald-500 px-2 py-1 font-medium text-black hover:bg-emerald-400">Queue task</button>
         </form>

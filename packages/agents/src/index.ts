@@ -23,9 +23,11 @@ export {
   scopesOverlap,
 } from './tasks';
 export { buildTaskBrief, type BriefInput } from './brief';
-export { startTerminalRun, type TerminalRunOptions } from './terminal-run';
+export { startTerminalRun, stripAnsi, type TerminalRunOptions } from './terminal-run';
 export { ClaudeCodeRuntime, parseClaudeStreamLine, type ClaudeCodeRuntimeOptions } from './runtimes/claude-code';
 export { GenericCliRuntime, type GenericCliRuntimeConfig } from './runtimes/generic-cli';
+export { CodexRuntime, parseCodexLine } from './runtimes/codex';
+export { GeminiRuntime } from './runtimes/gemini';
 export { createRuntimeRegistry } from './runtimes/index';
 export { ClientWorkspaceSession } from './workspace-session';
 export { decryptSecret, encryptSecret, maskSecret, parseCredentialsKey } from './credentials';
