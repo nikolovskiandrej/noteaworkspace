@@ -128,17 +128,19 @@ describeE2E('docker end-to-end', () => {
 
       // exec: a real child process with streamed output and an injected variable.
       let execOut = '';
-      const execExit = waitFor(ws, 'exec.exit');
       const execOutputs = waitFor(ws, 'exec.output', (m) => {
         execOut += m.data;
         return execOut.includes('exec-ok');
       });
+      execOutputs.catch(() => undefined);
+      const execExit = waitFor(ws, 'exec.exit');
+      execExit.catch(() => undefined);
       send(ws, {
         type: 'exec.start',
         reqId: 'x1',
-        command: 'git --version && echo "exec-ok $NOTEA_TEST_VAR" && cat hello.txt',
+        command: 'git --version && echo "exec-ok $DEMO_TEST_VAR" && cat hello.txt',
         shell: true,
-        env: { NOTEA_TEST_VAR: 'injected' },
+        env: { DEMO_TEST_VAR: 'injected' },
       });
       const started = await waitFor(ws, 'exec.started');
       expect(started.pid).toBeGreaterThan(0);

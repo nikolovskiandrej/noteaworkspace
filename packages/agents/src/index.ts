@@ -1,0 +1,30 @@
+export * from './types';
+export { PROVIDERS, credentialEnv, findModel, getProvider } from './providers';
+export {
+  CommandError,
+  ScriptedCommandRunner,
+  WorkspaceCommandRunner,
+  runOrThrow,
+  shellQuote,
+  type ScriptedResponse,
+} from './command-runner';
+export { DEFAULT_GIT_PATHS, GitWorktrees, taskBranch, taskWorktreePath, type GitPaths } from './git';
+export { PerKeyMutex, integrateTask, type IntegrationInput, type IntegrationResult } from './integration';
+export {
+  ACTIVE_TASK_STATUSES,
+  GLOBAL_SCOPE_PATHS,
+  InvalidTransitionError,
+  TASK_TRANSITIONS,
+  TERMINAL_TASK_STATUSES,
+  assertTransition,
+  canTransition,
+  effectiveScope,
+  globToRegExp,
+  scopesOverlap,
+} from './tasks';
+export { buildTaskBrief, type BriefInput } from './brief';
+export { startTerminalRun, type TerminalRunOptions } from './terminal-run';
+export { ClaudeCodeRuntime, parseClaudeStreamLine, type ClaudeCodeRuntimeOptions } from './runtimes/claude-code';
+export { GenericCliRuntime, type GenericCliRuntimeConfig } from './runtimes/generic-cli';
+export { createRuntimeRegistry } from './runtimes/index';
+export { ClientWorkspaceSession } from './workspace-session';

@@ -257,9 +257,10 @@ export class WorkspaceClient {
    * for git and check commands; use `onOutput` to stream progress.
    */
   async runExec(
-    input: Omit<RequestInput<'exec.start'>, 'type'>,
+    input: Omit<RequestInput<'exec.start'>, 'type'> & { stdin?: string },
     onOutput?: (stream: 'stdout' | 'stderr', data: string) => void,
   ): Promise<ExecResult> {
+    const { stdin, ...startInput } = input;
     let stdout = '';
     let stderr = '';
     let execId: string | null = null;
@@ -288,10 +289,11 @@ export class WorkspaceClient {
       const done = new Promise<ExecResult>((resolve) => {
         settle = resolve;
       });
-      const started = await this.startExec(input);
+      const started = await this.startExec(startInput);
       execId = started.execId;
       for (const message of buffered) if (message.execId === execId) handle(message);
       buffered.length = 0;
+      if (stdin !== undefined) this.execStdin(execId, stdin, true);
       return await done;
     } finally {
       offOutput();
