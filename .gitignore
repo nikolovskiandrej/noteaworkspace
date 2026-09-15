@@ -19,3 +19,6 @@ coverage/
 .DS_Store
 Thumbs.db
 next-env.d.ts
+
+# test scratch (redirected off the system drive by vitest.shared.ts)
+.tmp/
