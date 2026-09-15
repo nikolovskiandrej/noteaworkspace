@@ -53,6 +53,9 @@ export const workspaces = pgTable(
     lastKnownStatus: text('last_known_status'),
     /** Multi-agent coordination settings; see docs/AGENT_SYSTEM.md. */
     coordinationPolicy: jsonb('coordination_policy').$type<CoordinationPolicy>(),
+    /** Lease held by the worker currently integrating into this workspace (multi-worker safety). */
+    integrationLockedBy: text('integration_locked_by'),
+    integrationLockedUntil: timestamp('integration_locked_until', { withTimezone: true }),
     ...timestamps,
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },

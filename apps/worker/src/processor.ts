@@ -31,6 +31,7 @@ import {
   type TaskUsage,
 } from '@notea/db';
 import type { ClientIdentity } from '@notea/protocol';
+import { acquireIntegrationLease, releaseIntegrationLease } from './integration-lease';
 import type { ConnectWorkspace } from './workspace-connection';
 
 export interface ProcessorLogger {
@@ -263,12 +264,20 @@ const integrationMutex = new PerKeyMutex();
 export async function integrateApprovedTask(deps: ProcessorDeps, task: AgentTask): Promise<void> {
   const { db, log } = deps;
   const now = deps.now ?? (() => new Date());
+  // Cross-process safety: one worker per workspace at a time (in-process mutex below
+  // handles concurrency within this worker). If another worker holds the lease the
+  // task stays `approved` and is retried on a later tick.
+  if (!(await acquireIntegrationLease(db, task.workspaceId, deps.workerId, now()))) return;
+
   const [claimed] = await db
     .update(agentTasks)
     .set({ status: 'integrating', updatedAt: now() })
     .where(and(eq(agentTasks.id, task.id), eq(agentTasks.status, 'approved')))
     .returning();
-  if (!claimed) return;
+  if (!claimed) {
+    await releaseIntegrationLease(db, task.workspaceId, deps.workerId);
+    return;
+  }
 
   await integrationMutex.run(task.workspaceId, async () => {
     const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.id, task.workspaceId) });
@@ -309,6 +318,7 @@ export async function integrateApprovedTask(deps: ProcessorDeps, task: AgentTask
       log.error('integration failed', { taskId: task.id, error: message });
     } finally {
       connection?.close();
+      await releaseIntegrationLease(db, task.workspaceId, deps.workerId);
     }
   });
 }

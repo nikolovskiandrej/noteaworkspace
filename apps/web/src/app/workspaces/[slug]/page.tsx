@@ -92,8 +92,15 @@ export default async function WorkspacePage({
           Credentials
         </Link>
         {role === 'owner' ? (
-          <form action={deleteWorkspaceAction}>
+          <form action={deleteWorkspaceAction} className="flex items-center gap-1">
             <input type="hidden" name="workspaceId" value={workspace.id} />
+            <input type="hidden" name="expectedSlug" value={workspace.slug} />
+            <input type="hidden" name="returnTo" value={returnTo} />
+            <input
+              name="confirmSlug"
+              placeholder={`type ${workspace.slug} to delete`}
+              className="mono w-44 rounded border border-[#2b313b] bg-[#0e1014] px-2 py-0.5 text-xs outline-none focus:border-rose-500/60"
+            />
             <button className="rounded border border-rose-500/30 px-2 py-0.5 text-xs text-rose-300 hover:bg-rose-500/10">Delete workspace</button>
           </form>
         ) : null}

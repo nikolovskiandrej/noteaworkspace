@@ -15,6 +15,13 @@
       "when": 1789487925218,
       "tag": "0001_high_dazzler",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789491258985,
+      "tag": "0002_pretty_red_wolf",
+      "breakpoints": true
     }
   ]
 }

@@ -18,7 +18,7 @@ export default async function SignInPage({
         </div>
         {error ? (
           <p className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
-            Invalid email or password.
+            {error === 'rate_limited' ? 'Too many failed attempts. Try again in 15 minutes.' : 'Invalid email or password.'}
           </p>
         ) : null}
         <input type="hidden" name="callbackUrl" value={callbackUrl ?? '/'} />

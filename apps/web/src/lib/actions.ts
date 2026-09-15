@@ -1,6 +1,6 @@
 'use server';
 
-import { AuthError } from 'next-auth';
+import { AuthError, CredentialsSignin } from 'next-auth';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { auth, signIn, signOut } from '@/auth';
@@ -49,6 +49,7 @@ export async function signInAction(formData: FormData): Promise<void> {
       redirectTo: callbackUrl.startsWith('/') ? callbackUrl : '/',
     });
   } catch (err) {
+    if (err instanceof CredentialsSignin && err.code === 'rate_limited') redirect('/sign-in?error=rate_limited');
     if (err instanceof AuthError) redirect('/sign-in?error=invalid');
     throw err; // NEXT_REDIRECT on success
   }
@@ -100,10 +101,14 @@ export async function stopWorkspaceAction(formData: FormData): Promise<void> {
 export async function deleteWorkspaceAction(formData: FormData): Promise<void> {
   const userId = await requireUserId();
   const workspaceId = field(formData, 'workspaceId');
+  const returnTo = field(formData, 'returnTo') || '/';
   try {
+    if (field(formData, 'confirmSlug').trim() !== field(formData, 'expectedSlug')) {
+      throw new Error('type the workspace slug to confirm deletion (this removes the container and its volume)');
+    }
     await deleteWorkspace(deps(), userId, workspaceId);
   } catch (err) {
-    withError('/', err);
+    withError(returnTo, err);
   }
   revalidatePath('/');
   redirect('/');
