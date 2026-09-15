@@ -1,0 +1,33 @@
+{
+  "name": "@notea/workspace-agent",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Daemon that runs inside every workspace container: terminals (PTY), files, presence",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/lib.ts",
+      "default": "./src/lib.ts"
+    },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "default": "./src/testing.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=cjs --external:node-pty --outfile=dist/agent.cjs --log-level=warning",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@notea/protocol": "0.0.1",
+    "ws": "^8.21.3"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
+  }
+}

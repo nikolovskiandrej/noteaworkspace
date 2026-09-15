@@ -1,0 +1,32 @@
+{
+  "name": "notea-workspace",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Notea Workspace: a shared remote development workspace for humans and AI coding agents",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build:agent": "npm run build -w @notea/workspace-agent",
+    "build:image": "npm run build:agent && docker build -f infra/workspace-image/Dockerfile -t notea/workspace:dev .",
+    "dev:orchestrator": "npm run dev -w @notea/orchestrator"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.4",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.13",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "node-pty@1.1.0": true
+  }
+}

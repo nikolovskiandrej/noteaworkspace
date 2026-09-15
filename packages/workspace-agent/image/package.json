@@ -1,0 +1,12 @@
+{
+  "name": "notea-workspace-agent-runtime",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Runtime dependencies installed inside the workspace image next to the bundled agent",
+  "dependencies": {
+    "node-pty": "1.1.0"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
+  }
+}
