@@ -1,0 +1,21 @@
+{
+  "name": "@notea/worker",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Background worker: runs queued agent tasks in isolated worktrees and integrates approved ones",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@notea/agents": "0.0.1",
+    "@notea/db": "0.0.1",
+    "@notea/protocol": "0.0.1",
+    "@notea/workspace-client": "0.0.1",
+    "drizzle-orm": "^0.45.2",
+    "zod": "^4.6.5"
+  }
+}

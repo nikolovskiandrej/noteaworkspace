@@ -28,3 +28,4 @@ export { ClaudeCodeRuntime, parseClaudeStreamLine, type ClaudeCodeRuntimeOptions
 export { GenericCliRuntime, type GenericCliRuntimeConfig } from './runtimes/generic-cli';
 export { createRuntimeRegistry } from './runtimes/index';
 export { ClientWorkspaceSession } from './workspace-session';
+export { decryptSecret, encryptSecret, maskSecret, parseCredentialsKey } from './credentials';

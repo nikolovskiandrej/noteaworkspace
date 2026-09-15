@@ -130,7 +130,7 @@ describeE2E('docker end-to-end', () => {
       let execOut = '';
       const execOutputs = waitFor(ws, 'exec.output', (m) => {
         execOut += m.data;
-        return execOut.includes('exec-ok');
+        return execOut.includes('persisted');
       });
       execOutputs.catch(() => undefined);
       const execExit = waitFor(ws, 'exec.exit');

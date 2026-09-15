@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { OrchestratorClient, OrchestratorError } from '../src/lib/orchestrator';
+import { OrchestratorClient, OrchestratorError } from '@notea/workspace-client';
 
 function client(handler: (input: string, init?: RequestInit) => Response | Promise<Response>) {
   const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => handler(String(input), init));

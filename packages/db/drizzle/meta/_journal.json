@@ -8,6 +8,13 @@
       "when": 1789485378852,
       "tag": "0000_hot_risque",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789487925218,
+      "tag": "0001_high_dazzler",
+      "breakpoints": true
     }
   ]
 }
