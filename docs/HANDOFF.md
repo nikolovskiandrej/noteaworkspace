@@ -69,10 +69,11 @@ None open. Session 6 closed the `/proc` credential exposure architecturally (D-0
 
 ## 20. Blockers
 
-**Two, both needing the owner.**
+**One, and it is only about deployment.**
 
-1. **No provider credential exists on this machine.** `provider_credentials` is empty and no provider variable is set, so every agent run stops at its CLI's auth check — verified again in session 7: the CHANGELOG task's run ended `failed`, exit 1, summary `Not logged in · Please run /login`, with correctly parsed events and no credential material anywhere in the database. Connect one under **Settings → AI & Claude**: `claude setup-token` for a subscription (no API charges) or a console key for metered API use.
-2. **Deployment needs accounts and a production database.** There is no git remote, no Vercel CLI login, and no production Postgres. `DEPLOYMENT.md` has the exact steps; nothing in the repository blocks them.
+The credential blocker is **closed**: a Claude subscription token is stored for `andrej@notea.mk` and the first authenticated run completed end to end (§23). Anthropic is covered; **OpenAI and Google still have no credential**, so Codex and Gemini runs still stop at their own auth checks — a missing credential, not a defect.
+
+**Deployment needs accounts and a production database.** There is no git remote, no Vercel CLI login, and no production Postgres. Deploying `apps/web` without `DATABASE_URL` and `AUTH_SECRET` would produce a URL that errors on every request, so it has deliberately not been done. `DEPLOYMENT.md` has the exact steps; nothing in the repository blocks them.
 
 ## 21. Tested / 22. Not tested
 
@@ -112,7 +113,15 @@ The `demo-project` workspace exists in the dev database (`ebc7f427-…`); its co
 
 ## 24. Exact next step
 
-**Connect a Claude credential and run the first authenticated task. That is the only thing standing between this repository and a finished M3.**
+**Done in session 7 — M3 is closed.** The first authenticated Claude Code task ran end to end: real process as uid 20003, real `Bash`/`Write` tool use, `CHANGELOG.md` written and committed (`644178a`), approved by its owner, fast-forwarded to `main` (`a83cffe`), branch reaped, no credential anywhere in logs, events, diffs or the database.
+
+The next steps are now:
+1. **Deploy** — `DEPLOYMENT.md` §3 (GitHub), §4 (Vercel for `apps/web`, needs a managed Postgres first), §5 (a Linux host for the orchestrator, worker, Docker and containers).
+2. **Capture fixtures** — add the authenticated `assistant`/`tool_use`/`result` records to `packages/agents/test/runtimes.test.ts` beside the unauthenticated ones.
+3. **Codex and Gemini** — repeat the authenticated run for each once a credential exists.
+4. M2 leftovers: file watcher for terminal-side edits, invites by link.
+
+## 24b. How the first authenticated run was done (session 7)
 
 1. Start the stack: `docker compose -p notea-dev -f infra/compose/docker-compose.dev.yml up -d`, then the orchestrator, web and **exactly one** worker (§29).
 2. Sign in as `andrej@notea.mk`, open **Settings → AI & Claude**, and connect a credential: run `claude setup-token` yourself and paste the `sk-ant-oat01-…` token (subscription, billed to your Claude plan), or paste a console API key (metered). The UI names the billing relationship on each; **Check** runs `claude auth status --json` inside a real container under your own uid and shows what the CLI reports.
