@@ -73,7 +73,7 @@ None open. Session 6 closed the `/proc` credential exposure architecturally (D-0
 
 The credential blocker is **closed**: a Claude subscription token is stored for `andrej@notea.mk` and the first authenticated run completed end to end (§23). Anthropic is covered; **OpenAI and Google still have no credential**, so Codex and Gemini runs still stop at their own auth checks — a missing credential, not a defect.
 
-**Deployment needs accounts and a production database.** There is no git remote, no Vercel CLI login, and no production Postgres. Deploying `apps/web` without `DATABASE_URL` and `AUTH_SECRET` would produce a URL that errors on every request, so it has deliberately not been done. `DEPLOYMENT.md` has the exact steps; nothing in the repository blocks them.
+**The control plane is deployed; the runtime host is not.** `apps/web` is live at https://noteaworkspace-web.vercel.app against a Neon Postgres, and the repository is at https://github.com/nikolovskiandrej/noteaworkspace. What is still missing is a **Linux host running the orchestrator, the worker and Docker** — without it a workspace cannot start, so terminals, the editor and agent tasks are unavailable on the deployed URL. `ORCHESTRATOR_URL` and `ORCHESTRATOR_PUBLIC_URL` are the placeholder `https://orchestrator.example.com` and must be pointed at that host (`DEPLOYMENT.md` §5) before anything beyond sign-in works.
 
 ## 21. Tested / 22. Not tested
 

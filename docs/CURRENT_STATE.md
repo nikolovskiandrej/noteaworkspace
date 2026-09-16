@@ -86,7 +86,15 @@ Without `DATABASE_URL`, the db/web/worker database suites skip themselves. Witho
 
 ## Deployment status (session 7)
 
-**NOT DEPLOYED — READY FOR VERCEL.** Nothing has been pushed or deployed, and no URL exists.
+**DEPLOYED (control plane only).** https://noteaworkspace-web.vercel.app — `apps/web` on Vercel, Postgres on Neon.
+
+Repository: https://github.com/nikolovskiandrej/noteaworkspace (branch `main`).
+
+Verified live on 2026-09-16: `/sign-in` returns 200 and renders the form; `/` and `/settings/ai` 307 to sign-in with the correct `callbackUrl`; and a sign-in POST with a deliberately wrong password returns `302 → /sign-in?error=CredentialsSignin` rather than a 500 — which proves the deployed app reaches Neon, finds the user and runs the scrypt check. The five migrations are applied to the Neon database and the first account exists.
+
+**Only the control plane is deployed, and that is the whole of what Vercel can host.** Starting a workspace, terminals, the editor and agent tasks all need the orchestrator, the worker and Docker on a Linux host (`DEPLOYMENT.md` §5); `ORCHESTRATOR_URL`/`ORCHESTRATOR_PUBLIC_URL` are currently the placeholder `https://orchestrator.example.com`, which satisfies the schema in `apps/web/src/lib/env.ts` so sign-in works, and must be replaced with the real host before any workspace can start.
+
+Two dependency defects were found by deploying and are fixed (`717aa95`, `2338bc7`): `typescript`, `@types/node`, `vitest` and **`drizzle-orm`** were used by `apps/web` but declared only in the root `package.json` (or nowhere). Local npm hoisting hid this; Vercel installs only the target workspace, so it did not. `drizzle-orm` was the real one — production code (`src/app/api/workspaces/[id]/connect-token/route.ts`) importing an undeclared package.
 
 What is ready: the production `next build` passes (7 routes), `docs/DEPLOYMENT.md` states which half of the product Vercel can host and which half cannot, `infra/deploy/` carries the systemd/Caddy/Postgres/env templates, `.env` is gitignored with only `.env.example` tracked, and a scan of every tracked file found no real credential, private key or machine-specific path.
 
