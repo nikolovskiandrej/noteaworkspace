@@ -44,11 +44,11 @@ Shared contracts: `packages/protocol` (workspace protocol v1.1 + orchestrator AP
 | Protocol | `packages/protocol` | Zod schemas/types: identify, terminals (with env), files (`fs.changed`), exec, presence, errors, close codes; orchestrator REST types. v1.1. | implemented, tested |
 | Workspace agent | `packages/workspace-agent` | In-container daemon: `SessionManager` (PTY, scrollback, multi-attach), `ProcessManager` (exec: streamed output, limits, timeouts, kill on disconnect), `FsService` (path-confined, etag), `AgentHub` (routing, roles, presence), token-gated WebSocket server. Bundled with esbuild. | implemented, tested |
 | Base image | `infra/workspace-image` | Debian + Node 24 + git + build tools + ripgrep + Claude Code / Codex / Gemini CLIs + the agent; user `dev`; health check. | implemented |
-| Orchestrator | `apps/orchestrator` | Container/volume/network lifecycle, hardened spec, image-change recreation on start, connect tokens (JWT) and agent tokens (HMAC), API-key REST, WebSocket bridge, optional dev console. | implemented, tested (+ Docker e2e) |
+| Orchestrator | `apps/orchestrator` | Container/volume/network lifecycle, hardened spec, image-change recreation on start, connect tokens (JWT) and agent tokens (HMAC), API-key REST, WebSocket bridge, **per-uid agent exec** (`/workspaces/:id/agent-exec`), optional dev console. | implemented, tested (+ Docker e2e) |
 | Workspace client | `packages/workspace-client` | `WorkspaceClient` (request/reply, events, reconnect with token refresh, `runExec`), `OrchestratorClient`. Works in browsers and Node. | implemented, tested |
 | Database | `packages/db` | Drizzle schema, migrations, client, migrate script. | implemented, tested |
 | Control plane | `apps/web` | Next.js 16 App Router: Auth.js credentials, server-side authorization, workspaces/members, terminal/editor/file tree/presence UI, tasks panel, policy, credentials settings. | implemented, tested, verified in Chrome |
-| Agents | `packages/agents` | Provider catalog, `AgentRuntime` interface, Claude Code headless runtime, generic CLI runtimes, `CommandRunner`, `GitWorktrees`, `integrateTask`, task transitions, scope overlap, brief builder, credential crypto. | implemented, tested |
+| Agents | `packages/agents` | Provider catalog and authentication modes, `AgentRuntime` interface, Claude Code headless runtime, generic CLI runtimes, `CommandRunner`, `IsolatedAgentSession` (per-member uid), `GitWorktrees`, `integrateTask`, task transitions, scope overlap, brief builder, credential crypto, `claude auth status` parsing. | implemented, tested |
 | Worker | `apps/worker` | Long-lived process: claims queued tasks, runs them in worktrees through the bridge as an agent participant, persists events, commits, moves to review; integrates approved tasks; recovers stale runs. | implemented, tested, verified in Docker |
 
 ## 3. Key flows
@@ -62,11 +62,11 @@ Shared contracts: `packages/protocol` (workspace protocol v1.1 + orchestrator AP
 ### 3.2 Collaboration (implemented parts)
 Members with roles; viewers cannot type, resize, write or run. Presence lists connected humans and agents and which sessions they watch. `fs.changed` (API writes) shows a "changed on disk" banner in other editors. Terminal tabs show agent sessions with a badge.
 
-### 3.3 Agent task (implemented, verified with the generic runtime)
-1. Editor/owner creates a task (title, description, runtime, model, credential, scope) → status `queued`, event recorded.
+### 3.3 Agent task (implemented; verified end to end with two members concurrently)
+1. Editor/owner creates a task (title, description, runtime, model, their own credential, scope) → status `queued`, event recorded.
 2. Worker claims the oldest queued task whose scope does not overlap a running task (policy `block`).
-3. Worker connects to the workspace as `kind: "agent"` (name = agent name), ensures the project is a git repo, creates worktree `/home/dev/.notea/worktrees/<taskId>` on branch `notea/task/<taskId>` from the base branch.
-4. Brief written to `/home/dev/.notea/runs/<runId>/brief.md`; credential decrypted and injected into the session env only; runtime starts a terminal session running the CLI (visible to everyone).
+3. Worker connects to the workspace as `kind: "agent"`, ensures the project is a git repo, applies the shared layout (`core.sharedRepository=group`, `2775` state directories), and creates worktree `/home/dev/.notea/worktrees/<taskId>` on branch `notea/task/<taskId>` from the base branch — all as `dev`.
+4. The worker resolves the task owner's `agent_uid` and builds an `IsolatedAgentSession` for it. The brief is written to `/home/dev/.notea/runs/<runId>/brief.md` **as that uid**; the credential is decrypted, checked to belong to the task's creator, turned into the one variable its `auth_mode` calls for, and handed to a process the Docker daemon starts as that uid — with every other provider variable cleared and a private HOME. No other member's process, and no human shell, can read it.
 5. Events (`started`, `message`, `tool_call`, `file_changed`, `usage`, `log`, `finished`) are persisted to `agent_run_events`; the worker heartbeats and honours cancellation.
 6. On exit: leftover changes are committed as the agent; diff stat stored; task → `needs_review` (or `approved` with policy `integration: auto`).
 7. Human approves → worker (one at a time per workspace) rebases the task branch onto the base branch, runs the policy's check command in the worktree, fast-forwards the base branch in the main tree, removes the worktree → `done`. Conflicts → `needs_rebase`; failing checks → `checks_failed`; both can be re-run.
@@ -76,6 +76,16 @@ Members with roles; viewers cannot type, resize, write or run. Presence lists co
 
 ## 4. Runtime model
 Unchanged from session 1: one container + one HOME volume per workspace, Docker as source of truth, labels for discovery, `published`/`network` connect modes, default limits 2 CPU / 4 GB / 2048 pids. New: recreation on image change; exec processes killed when their connection closes.
+
+### 4a. Agent exec (session 6)
+`POST /workspaces/:id/agent-exec` runs one process in a workspace container as a given
+Unix uid, buffered or streaming NDJSON, with a matching kill route. It exists because
+the in-container daemon runs unprivileged and cannot change uid, while the Docker
+daemon can — and running each member's agent as their own uid is what stops one member
+reading another's credential from `/proc`. The endpoint refuses any uid outside the
+agent range, fixes the gid, takes argv rather than a shell string, rejects
+`PATH`/`HOME`/`LD_*`/`NOTEA_*`, gives each uid a private `0700` HOME, and starts the
+process under `setsid` so cancellation reaches its children. See D-039.
 
 ## 5. Terminal and exec
 Terminals: node-pty, multi-attach, 256 KB scrollback replay, last-writer-wins resize, SIGHUP→SIGKILL kill, per-session env injection (allow-listed names). Exec: `child_process.spawn` (optionally via `bash -lc`), stdout/stderr streamed to the owner only, 8 MB output cap, 10 min default / 60 min max timeout, ≤16 concurrent, cwd anywhere in the container. Rule: long/watchable work → terminal session; short commands (git, checks) → exec.
@@ -96,11 +106,11 @@ Development on Windows + Docker Desktop (verified). Production for personal use 
 | Terminals, PTY, realtime | done |
 | Multi-user | roles, presence, shared terminals, fs change notices done; invites by link, watcher, rate limiting pending |
 | Concurrent edits | etag conflicts + notices; CRDT later |
-| Agent execution | done for CLIs via terminal sessions; Claude Code parser needs a real run to confirm |
-| Provider abstraction | done (catalog, credential env, runtimes) |
-| Agent isolation / coordination | done (worktrees, scope leases, serialized integration, approvals) |
+| Agent execution | done for CLIs, as the owning member's uid; the Claude Code parser is confirmed against real output, but no *authenticated* run has happened (no credential on this machine) |
+| Provider abstraction | done (catalog, authentication modes, credential env, runtimes) |
+| Agent isolation / coordination | done (per-member uid, worktrees, scope leases, serialized integration, approvals) |
 | Auth / permissions | done for personal use |
-| Secrets | encrypted credentials, per-run injection, allow-listed env |
+| Secrets | encrypted per-user credentials, one variable per run, others cleared, handed only to that member's uid |
 | Resource limits / sandboxing | container limits; disk quotas pending |
 | Previews, deployment, observability | pending |
 

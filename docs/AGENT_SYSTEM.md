@@ -1,6 +1,6 @@
 # Notea Workspace — Agent System
 
-Last updated: 2026-09-15 (session 5). Status: **implemented** (packages/agents, apps/worker, web tasks UI) and **verified in Docker**. All three CLI runtimes have been executed against the real binaries in a workspace container; each starts, is parsed correctly and stops at its credential check. Cancellation and the max-minutes timeout are verified end to end against real container processes. What has never run is an *authenticated* agent task — no provider credential exists on this machine.
+Last updated: 2026-09-15 (session 6). Status: **implemented** (packages/agents, apps/worker, web tasks UI) and **verified in Docker**. All three CLI runtimes have been executed against the real binaries in a workspace container; each starts, is parsed correctly and stops at its credential check. Cancellation and the max-minutes timeout are verified end to end against real container processes. Session 6 made every agent process run as **the Unix uid of the member whose task it is**, and drove two members' tasks through the whole pipeline concurrently. What has never run is an *authenticated* agent task — no provider credential exists on this machine.
 
 ## 1. Principles (unchanged)
 Agents are participants; isolation by worktree, integration by queue; scopes declared, leases advisory, integration authoritative; the repository is the memory; provider-agnostic; humans can always see, stop and approve.
@@ -8,19 +8,40 @@ Agents are participants; isolation by worktree, integration by queue; scopes dec
 ## 2. Layering (as implemented)
 
 ```
-Provider        packages/agents/src/providers.ts   anthropic | openai | google → credential env var, model catalog
-Credential      provider_credentials (encrypted) or a CLI login on the workspace volume
+Provider        packages/agents/src/providers.ts   anthropic | openai | google
+AuthMode        subscription (CLAUDE_CODE_OAUTH_TOKEN, no API charges) | api_key (metered)
+Credential      provider_credentials (encrypted, one owner, one mode) or a CLI login in the
+                member's private agent HOME
 Model           ModelRef {provider, modelId}; catalog entries may be marked unverified
 AgentRuntime    claude-code-cli (headless, parsed) | codex-cli | gemini-cli | generic-cli (unparsed)
-Workspace       the container; runs execute in a terminal session created through the protocol
+Identity        users.agent_uid — the Unix uid the member's agent processes run as
+Workspace       the container; runs execute as that uid through the orchestrator
 Task            agent_tasks row: description, scope, runtime, model, credential, branch, status, usage
 Project         /home/dev/project (main tree) + /home/dev/.notea/worktrees/<taskId>
 ```
 
 ## 3. Modes
-- **Interactive** (available today by hand): open a terminal, run `claude`/`codex`/`gemini`; everyone can watch. Not yet tied to a task record.
-- **Headless task run** (implemented): the worker starts the runtime in a terminal session with the brief; output is parsed into events; the session is visible in the UI as `agent: <name>`.
+- **Interactive** (available today by hand): open a terminal, run `claude`/`codex`/`gemini`; everyone can watch. Runs as `dev`, so a login made this way lands in the shared HOME and is *not* private to one member — use it only in a single-person workspace.
+- **Headless task run** (implemented): the worker starts the runtime as the task owner's uid through the orchestrator; output is parsed into events and stored on the run, and the tasks panel shows them. This is the path that carries credentials.
 - **API loop** (later): same interface, Notea-owned tools.
+
+### 3a. Where a run executes (session 6)
+`IsolatedAgentSession` (packages/agents) implements both `WorkspaceSession` and
+`CommandRunner` over the orchestrator's `POST /workspaces/:id/agent-exec`, so the
+runtimes did not change and remain unaware of isolation. Each exec:
+
+- runs as `users.agent_uid` of `agent_tasks.created_by`, with gid `dev`;
+- gets a private HOME at `/home/dev/.notea/agents/<uid>`, created `0700`;
+- runs with `umask 002`, so the shared group can still integrate and clean up;
+- carries exactly one credential variable and has every other one cleared;
+- carries `safe.directory` through `GIT_CONFIG_*`, because the repository belongs to
+  `dev` and git otherwise refuses to work in it.
+
+Cancellation signals the process *group* (the wrapper runs under `setsid` and records
+its pid), so a CLI's child tools die with it. The trade compared with session 5: a run
+is no longer a PTY session a human can attach to live — the run's event log is what the
+UI shows. Bringing live attachment back means teaching the daemon to adopt a process it
+did not spawn, and is not worth reopening the credential exposure for.
 
 ## 4. Runtime interface (actual)
 `packages/agents/src/types.ts`: `AgentRuntime { id, label, provider, supports(model), start(ctx, session) → AgentRunHandle { sessionId, events: AsyncIterable<AgentRunEvent>, cancel() } }`. `WorkspaceSession` is the small surface runtimes need (create/kill terminal, output/exit listeners, write a host file); `ClientWorkspaceSession` implements it over `WorkspaceClient`. `startTerminalRun` turns a command into an event stream with a max-minutes timeout.
@@ -51,8 +72,26 @@ Project         /home/dev/project (main tree) + /home/dev/.notea/worktrees/<task
 ## 8. Brief (implemented)
 `buildTaskBrief`: task, worktree/branch rules, scope, reserved paths of other running tasks, environment-level change warning, pointers to `AGENTS.md`/`docs/CURRENT_STATE.md`, check command, finish instructions. Written to `/home/dev/.notea/runs/<runId>/brief.md` and passed to the CLI.
 
-## 9. Credentials (implemented)
-Stored encrypted per user; selected per task; the worker decrypts with `CREDENTIALS_KEY` and injects `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` into the run's terminal session only (`term.create.env`). Without a credential the CLI's own login on the volume is used.
+## 9. Credentials and authentication modes (implemented)
+A credential belongs to exactly one user, carries an `auth_mode`, and is decrypted by
+the worker with `CREDENTIALS_KEY` for one run, into a process running as that member's
+own uid. The worker re-checks ownership (`credential.userId === task.createdBy`) and
+fails the run rather than borrowing another member's credential.
+
+| Mode | Variable | How the member gets it | Billing |
+|---|---|---|---|
+| `subscription` | `CLAUDE_CODE_OAUTH_TOKEN` | `claude setup-token` — Anthropic's own command for headless use of a Claude subscription | the member's plan; no API charges |
+| `api_key` | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | the provider's console | pay-as-you-go |
+
+Exactly one is ever set, and `conflictingEnvNames` is cleared inside the container:
+claude-code prefers the OAuth token when both are present, so setting both would let a
+subscription quietly become metered usage. Verified against claude-code 2.1.272:
+`claude auth status --json` reports `authMethod` `oauth_token`, `api_key` (with
+`apiKeySource`) or `none`, and **Settings → AI & Claude** can run exactly that inside a
+container under the member's own uid and show what the CLI says. Notea implements no
+authentication flow of its own and never handles a Claude password or browser session.
+
+Without a credential, the CLI's own login in the member's private agent HOME is used.
 
 ## 10. Usage and cost (partial)
 `usage` events (Claude Code `result` records) are summed per run and stored on the task. No budgets, no per-user reports yet.

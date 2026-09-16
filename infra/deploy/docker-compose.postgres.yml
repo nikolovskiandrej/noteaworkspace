@@ -1,0 +1,30 @@
+# Production Postgres on the same host as the orchestrator and worker. Skip this file
+# if you use a managed database; then DATABASE_URL simply points there.
+#
+#   docker compose -p notea -f infra/deploy/docker-compose.postgres.yml up -d
+#
+# Bound to 127.0.0.1 only. The web app on Vercel cannot reach a loopback-bound
+# database: for that topology use a managed Postgres, or expose this one through a
+# TLS-terminating proxy you control (out of scope here).
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: notea-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: notea
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the environment}
+      POSTGRES_DB: notea
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - notea-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notea -d notea"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  notea-postgres-data:
+    name: notea-postgres-data

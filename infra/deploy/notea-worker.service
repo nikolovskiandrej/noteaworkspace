@@ -1,0 +1,24 @@
+# systemd unit for the Notea worker (docs/DEPLOYMENT.md §5).
+# Run exactly ONE instance: claims are per process (docs/CURRENT_STATE.md, issue 8).
+[Unit]
+Description=Notea Workspace worker (agent tasks, integration, reaper)
+After=network-online.target notea-orchestrator.service
+Wants=network-online.target notea-orchestrator.service
+
+[Service]
+Type=simple
+User=notea
+Group=notea
+WorkingDirectory=/opt/notea-workspace/app
+EnvironmentFile=/opt/notea-workspace/app/.env
+ExecStart=/usr/bin/npm run start -w @notea/worker
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/notea-workspace
+
+[Install]
+WantedBy=multi-user.target

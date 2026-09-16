@@ -154,7 +154,10 @@ describe('shared project layout', () => {
     const script = sharedLayoutScript(PATHS);
     expect(script).toContain('git config core.sharedRepository group');
     expect(script).toContain("chmod 2775 '/home/dev/.notea'");
-    expect(script).toContain('chmod -R g+rwX .git');
+    // Only files `dev` owns: an agent's objects belong to that member's uid and are
+    // already group-writable, and chmod'ing them would fail and take the run with it.
+    expect(script).toContain('find .git -user "$(id -u)" -exec chmod g+rwX {} +');
+    expect(script).not.toContain('chmod -R');
     // `other` is never widened: the uid separation is what isolates members.
     expect(script).not.toMatch(/o\+[rwx]/);
     expect(script).not.toContain('chmod 777');

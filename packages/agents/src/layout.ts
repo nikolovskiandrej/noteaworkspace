@@ -62,8 +62,13 @@ export function sharedLayoutScript(paths: GitPaths, noteaDir: string = DEFAULT_N
     `cd ${shellQuote(paths.projectDir)}`,
     'git config core.sharedRepository group',
     `if [ ! -e ${shellQuote(marker)} ]; then`,
-    '  chmod -R g+rwX .git',
-    '  find .git -type d -exec chmod g+s {} +',
+    // Only what this user owns. Objects an agent wrote belong to that member's uid,
+    // and `dev` cannot chmod them -- nor does it need to: they are already
+    // group-writable, because agents run with umask 002. Using `chmod -R` here
+    // fails the whole setup, and therefore the run, as soon as one agent has
+    // committed anything.
+    '  find .git -user "$(id -u)" -exec chmod g+rwX {} +',
+    '  find .git -user "$(id -u)" -type d -exec chmod g+s {} +',
     `  : > ${shellQuote(marker)}`,
     'fi',
   ].join('\n');

@@ -6,7 +6,7 @@ Last updated: 2026-09-15 (session 2). Ordered steps for the next implementing ag
 TypeScript strict; zod at trust boundaries; tests beside code in `test/`; packages export TS source; protocol changes are additive within v1.x (schema + type + test together); `npm run typecheck && npm test` (with `DATABASE_URL`) before every commit; keep `docs/CURRENT_STATE.md` accurate.
 
 ## Step 1 — First real Claude Code run (highest value)
-1. Store an Anthropic key under Settings → Credentials (or `claude login` in a workspace terminal).
+1. Connect a Claude credential under Settings → AI & Claude (a subscription token from `claude setup-token`, or an API key); it is injected only into that member's own agent processes.
 2. Create a Claude Code task with a small scope; watch the `agent:` terminal.
 3. Compare the real stream-json records with `parseClaudeStreamLine`; fix flags/parsing in `packages/agents/src/runtimes/claude-code.ts`; add real lines as fixtures in `packages/agents/test/runtimes.test.ts`.
 4. Confirm usage/cost extraction and the `finished` summary; confirm the commit/diff flow and approval.

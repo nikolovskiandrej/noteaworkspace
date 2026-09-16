@@ -1,0 +1,27 @@
+# systemd unit for the Notea orchestrator (docs/DEPLOYMENT.md §5).
+# Install: sudo cp infra/deploy/notea-orchestrator.service /etc/systemd/system/
+[Unit]
+Description=Notea Workspace orchestrator (Docker lifecycle, WebSocket bridge)
+After=network-online.target docker.service
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The service account must be in the `docker` group.
+User=notea
+Group=notea
+WorkingDirectory=/opt/notea-workspace/app
+EnvironmentFile=/opt/notea-workspace/app/.env
+ExecStart=/usr/bin/npm run start -w @notea/orchestrator
+Restart=always
+RestartSec=3
+# Hardening; the orchestrator only needs the Docker socket and its own directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/notea-workspace
+
+[Install]
+WantedBy=multi-user.target
