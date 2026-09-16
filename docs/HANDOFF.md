@@ -1,6 +1,6 @@
 # Notea Workspace — Handoff
 
-Written 2026-09-15, updated at the end of session 5 (worktree/branch reaper + agent-package cleanup). Self-contained; the conversation is not needed. Read `CURRENT_STATE.md` next, then `ARCHITECTURE.md`, `AGENT_SYSTEM.md`, `DECISIONS.md`.
+Written 2026-09-15, updated at the end of session 7 (verification, completion and deployment readiness). Self-contained; the conversation is not needed. Read `CURRENT_STATE.md` next, then `ARCHITECTURE.md`, `AGENT_SYSTEM.md`, `DECISIONS.md`, `SECURITY_MODEL.md`, `DEPLOYMENT.md`.
 
 ## 1. Product summary
 
@@ -8,11 +8,10 @@ Self-hosted, browser-based shared development workspace: one persistent Linux co
 
 ## 2. Current goal
 
-Make the agent flow real with actual coding agents and harden collaboration:
-1. Run the first *authenticated* Claude Code task (needs an Anthropic key stored under Settings → Credentials, or `claude login` in a workspace terminal) and confirm the stream-json parsing against CLI 2.1.272. The flags and the command line are already verified against the real CLI; what has never been exercised is a run that gets past authentication.
-2. Same for the Codex and Gemini runtimes, which now have their own parsers rather than the generic one.
-3. M2 leftovers: file watcher (`fs.changed` for terminal-side edits), invites by link. Sign-in rate limiting is done (commit `d50481f`).
-4. M2 deployment: single-VPS compose with Caddy (see `IMPLEMENTATION_PLAN.md`).
+1. Run the first *authenticated* Claude Code task. Connect a credential under **Settings → AI & Claude** — either a subscription token from the member's own `claude setup-token` or an API key — and confirm the stream-json parsing against CLI 2.1.272 on a run that gets past authentication. Everything up to that boundary is verified; the credential is the only blocker.
+2. Same for the Codex and Gemini runtimes, which have their own parsers.
+3. M2 leftovers: file watcher (`fs.changed` for terminal-side edits), invites by link.
+4. Deploy: push to GitHub, then the Vercel + VPS split in `DEPLOYMENT.md`.
 
 ## 3. Current architecture
 
@@ -62,7 +61,7 @@ Unchanged from session 1 (`ARCHITECTURE.md` §4–6) plus: exec processes bound 
 
 ## 18. Known bugs
 
-None open. Session 5 resolved the worktree/branch leak (formerly technical debt) with a worker-side reaper, verified against the live container (D-038). Fixed in session 4, each with tests: connect tokens written to the orchestrator log (D-033); the worker exceeding its concurrency limit (D-034); the integration lease released while another task still needed it (D-035); a lost terminal-exit notification hanging a run forever (D-036); an overridden failure losing the CLI's explanation (D-037). Earlier sessions: Next 16 `allowedDevOrigins`, provider constructed during SSR, proxy matcher export name, stale container image after rebuild.
+None open. Session 6 closed the `/proc` credential exposure architecturally (D-039) and separated subscription from API billing (D-040); session 7 re-proved the isolation by hand against a live container and fixed the one defect that work left behind — `ensureSharedLayout` ran `chmod -R g+rwX .git`, which fails as soon as an agent uid owns objects in `.git`, taking the run with it (now `find .git -user "$(id -u)"`). Session 5 resolved the worktree/branch leak (formerly technical debt) with a worker-side reaper, verified against the live container (D-038). Fixed in session 4, each with tests: connect tokens written to the orchestrator log (D-033); the worker exceeding its concurrency limit (D-034); the integration lease released while another task still needed it (D-035); a lost terminal-exit notification hanging a run forever (D-036); an overridden failure losing the CLI's explanation (D-037). Earlier sessions: Next 16 `allowedDevOrigins`, provider constructed during SSR, proxy matcher export name, stale container image after rebuild.
 
 ## 19. Technical debt
 
@@ -70,7 +69,10 @@ None open. Session 5 resolved the worktree/branch leak (formerly technical debt)
 
 ## 20. Blockers
 
-**One, and it needs the owner: no provider credential exists on this machine.** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` and `GOOGLE_API_KEY` are all unset and the `provider_credentials` table is empty, so every agent run stops at its CLI's auth check. Store a key under Settings → Credentials, or log a CLI in from a workspace terminal. Nothing else is blocked.
+**Two, both needing the owner.**
+
+1. **No provider credential exists on this machine.** `provider_credentials` is empty and no provider variable is set, so every agent run stops at its CLI's auth check — verified again in session 7: the CHANGELOG task's run ended `failed`, exit 1, summary `Not logged in · Please run /login`, with correctly parsed events and no credential material anywhere in the database. Connect one under **Settings → AI & Claude**: `claude setup-token` for a subscription (no API charges) or a console key for metered API use.
+2. **Deployment needs accounts and a production database.** There is no git remote, no Vercel CLI login, and no production Postgres. `DEPLOYMENT.md` has the exact steps; nothing in the repository blocks them.
 
 ## 21. Tested / 22. Not tested
 
@@ -78,13 +80,23 @@ Tested: see §6 and the verification table in `CURRENT_STATE.md`, which now cove
 
 Not tested: an **authenticated** agent run of any provider — the one real gap; `network` connect mode on Linux; more than one worker process; long-running (hours) sessions; browser on mobile; recovery from a workspace connection dropped mid-run (the 10 s exit-grace fallback covers it in unit tests, not against a real severed connection).
 
-## 23. Exact current state (session 5)
+## 23. Exact current state (session 7)
+
+**Session 6's work is complete, committed and independently verified; the repository is ready for GitHub and for the Vercel half of the deployment.**
+
+Session 6 (commit `a2e29d3`) fixed the credential exposure architecturally: `users.agent_uid` gives every member a Unix uid (20001+), the orchestrator's `POST /workspaces/:id/agent-exec` starts agent processes under it through the Docker daemon, and `IsolatedAgentSession` adapts that to the existing runtime interfaces so no runtime changed (D-039). It also split subscription from API billing: `provider_credentials.auth_mode` decides the single environment variable a run gets, and the others are cleared inside the container (D-040). It left the rest uncommitted; session 7 finished and committed it as `8af40d6`.
+
+Session 7 did four things. **It fixed the one defect session 6 left behind**: `ensureSharedLayout` ran `chmod -R g+rwX .git`, which succeeds only until an agent uid owns objects in `.git` — after that `dev` cannot chmod them, the command exits non-zero and takes the run with it. It now touches only `find .git -user "$(id -u)"`, which suffices because agents run with `umask 002`. **It re-proved the isolation by hand** rather than trusting the suite: two processes as uid 20003 and 20004, each holding a distinct marker key; each can read its own `/proc/<pid>/environ`, and uid 20003 → 20004, uid 20004 → 20003 and `dev` → both all fail with `Permission denied`, with `CapEff=0` and `NoNewPrivs=1` still reported and `setpriv`/`hidepid` still refused. **It ran everything**: typecheck across 9 workspaces, 167 tests passed / 3 skipped with a database attached, the 3 Docker e2e tests, and a production `next build` (7 routes). **It prepared deployment**: `DEPLOYMENT.md` plus `infra/deploy/` templates, and a scan showing no real secret, private key or machine-specific path in any tracked file.
+
+Not done, and why: **no authenticated agent run**, because `provider_credentials` is empty (§20). Session 7 re-confirmed the exact boundary — the CHANGELOG task's run ends `failed`, exit 1, `Not logged in · Please run /login`, events parsed correctly, nothing secret persisted anywhere.
+
+## 23a. Prior state (session 5)
 
 **A worker-side worktree/branch reaper was added, and the agent package's git layer was cleaned up.** `apps/worker/src/reaper.ts` runs on the worker tick (`WORKER_REAP_INTERVAL_MS`, default 60 s): it removes the worktree and branch of a deleted task (archiving the branch tip to `refs/notea/archive/<id>` first) and the merged branch of an integrated task, keeps re-runnable and active tasks, in-use worktrees and `main`, scans only running containers, and skips a workspace while any task there is active (D-038). Verified against the demo container: it reaped exactly the one leftover `done` branch and was idempotent. `GitWorktrees` gained the read/query/delete helpers this needs, `removeTaskWorktree` is now single-purpose, and `packages/agents/src/layout.ts` centralises run-artefact paths (the four runtimes use `runBriefPath` instead of hardcoding). Suite: agents 28 → 31 (git parser guards), worker 8 → 17, total 133 → 145, all green; typecheck and `next build` clean.
 
 This built on an incomplete, uncommitted refactor of `git.ts` (the reaper helper toolkit) plus `layout.ts` found in the working tree at session start; that work was adopted and finished rather than discarded, and `processor.ts` was updated to the new single-arg `removeTaskWorktree`.
 
-## 23a. Prior state (session 4)
+## 23b. Prior state (session 4)
 
 **The migration was re-verified independently, and the agent pipeline was hardened.** Storage: Docker's data disk is at `D:\DockerDesktop\wsl` (confirmed from Docker's own settings API and the WSL registration), nothing of this project's remains on C:, and the repository contains no C: paths outside documentation. Environment: all four migrations applied and in sync with the journal, Postgres on 55432 with the other project's Postgres untouched on 5432, container hardening intact (non-root `dev`, `CapDrop ALL`, `no-new-privileges`, no bind mounts), all three agent CLIs present in the running container.
 
@@ -92,13 +104,22 @@ Verified for real, not with mocks: the browser UI end to end (sign-in session, f
 
 Five defects were found and fixed, each with tests: connect tokens were being written to the orchestrator log (D-033); the worker could exceed its concurrency limit and claim every queued task in one tick (D-034); the integration lease could be released while a second task still needed it (D-035); a lost terminal-exit notification would hang a run forever, out of reach of stale-run recovery (D-036); and an overridden failure lost the CLI's explanation (D-037). Suite: 24 files, all green — agents 28, workspace-agent 42, orchestrator 21 (+18 Docker e2e), web 13, protocol 6, workspace-client 6, worker 8, db 1.
 
-## 23b. Previous state
+## 23c. Previous state
 
 **The disk problem is fixed.** Session 3 moved Docker's data disk, the npm cache and test scratch off C: onto D: (`ARCHITECTURE.md` §12); C: went from 1.01 GB free to 22.19 GB free, and a full `npm run build:image` now writes nothing to C:. The whole stack was re-verified on the new storage: typecheck, every test suite (including the db/worker suites against a real Postgres and the orchestrator's real-Docker e2e), a production `next build`, an image rebuild, container recreation with the HOME volume preserved, and a `generic-cli` task driven from `queued` to `done`.
 
 The `demo-project` workspace exists in the dev database (`ebc7f427-…`); its container runs the freshly rebuilt image containing claude-code 2.1.272, codex-cli 0.154.0 and gemini-cli 0.59.0, and its volume holds the integrated agent commits. Background processes started for verification (orchestrator, web dev server, worker) are stopped at handoff.
 
 ## 24. Exact next step
+
+**Connect a Claude credential and run the first authenticated task. That is the only thing standing between this repository and a finished M3.**
+
+1. Start the stack: `docker compose -p notea-dev -f infra/compose/docker-compose.dev.yml up -d`, then the orchestrator, web and **exactly one** worker (§29).
+2. Sign in as `andrej@notea.mk`, open **Settings → AI & Claude**, and connect a credential: run `claude setup-token` yourself and paste the `sk-ant-oat01-…` token (subscription, billed to your Claude plan), or paste a console API key (metered). The UI names the billing relationship on each; **Check** runs `claude auth status --json` inside a real container under your own uid and shows what the CLI reports.
+3. Re-queue "Claude: add a CHANGELOG entry" and watch the first *authenticated* run: the agent should edit inside `/home/dev/.notea/worktrees/<taskId>` as your own uid, the task should reach `needs_review` with a real diff stat, and approving it should rebase and fast-forward `main`. Add the real `assistant`/`tool_use`/`result` records as fixtures next to the unauthenticated ones in `packages/agents/test/runtimes.test.ts`.
+4. Then deploy: `DEPLOYMENT.md` §3 (GitHub) and §4-§5 (Vercel for `apps/web`, a Linux host for the orchestrator, worker, Docker and Postgres).
+
+## 24a. Superseded next step (session 5)
 
 **The only blocker is a credential, and it needs you.** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` and `GOOGLE_API_KEY` are all unset and `provider_credentials` is empty, so every agent run stops at its CLI's auth check. Everything up to that boundary is verified.
 
@@ -107,7 +128,7 @@ The `demo-project` workspace exists in the dev database (`ebc7f427-…`); its co
 3. Re-queue "Claude: add a CHANGELOG entry" and watch the first *authenticated* run: the agent should edit inside `/home/dev/.notea/worktrees/<taskId>`, the task should reach `needs_review` with a real diff stat, and approving it should rebase and fast-forward `main`. Add the real `assistant`/`tool_use`/`result` records as fixtures next to the unauthenticated ones already in `packages/agents/test/runtimes.test.ts`.
 4. Then pick up, in rough order of value: live run events instead of the 5 s refresh (`IMPLEMENTATION_PLAN.md` step 3) and the M2 leftovers. The worktree/branch reaper is done (session 5, D-038).
 
-Before sharing a workspace with anyone, read `SECURITY_MODEL.md` → Provider credentials: a collaborator with terminal access can read the key of a run in flight through `/proc`.
+(The session-5 warning that a collaborator with terminal access could read a running task's key through `/proc` no longer applies: D-039 fixed it and session 7 re-verified it. `SECURITY_MODEL.md` → Agent identity isolation states what is and is not covered.)
 
 ## 25. Files to inspect first
 
@@ -144,7 +165,8 @@ Storage on this machine is deliberately off the C: drive — Docker's data disk 
 | Orchestrator | `npm run dev:orchestrator` (or `npx tsx src/index.ts` in `apps/orchestrator`) |
 | Web | `npm run dev -w @notea/web` → http://127.0.0.1:3000 |
 | Worker | `npm run dev -w @notea/worker` |
-| Tests | `npm run typecheck && npm test` (set `DATABASE_URL` for the db-backed suites) |
+| Seed dev users | `npm run seed:dev -w @notea/web` (creates Andrej and Niche with agent uids) |
+| Tests | `npm run typecheck && npm test` — set `DATABASE_URL` to a **throw-away** database for the db/worker/web suites (`CREATE DATABASE notea_test`); the worker suite deletes tasks in `beforeEach` |
 | Docker e2e | `npm run test:e2e -w @notea/orchestrator` |
 
 ## 30. Open questions

@@ -1,10 +1,10 @@
 # Notea Workspace — Current State
 
-Last updated: 2026-09-15, end of session 5 (worktree/branch reaper + agent-package cleanup). Update this file whenever reality changes.
+Last updated: 2026-09-16, end of session 7 (verification, completion and deployment readiness). Update this file whenever reality changes.
 
 ## One-line status
 
-**M0 (runtime), M1 (control plane + browser UI) and the core of M3 (agent tasks in isolated worktrees with human-approved, serialized integration) are implemented, tested, and verified end to end in Docker — including the browser UI, real cancellation, real timeouts, and real runs of all three agent CLIs. M2 collaboration is partially done (membership, roles, shared terminals, presence, file-change notices). Storage lives on D: (session 3) and was re-verified independently in session 4. Session 5 added a worker-side reaper that cleans orphaned task worktrees and branches (D-038), verified against the live container. The one thing that has never happened is an *authenticated* agent run: no provider credential exists on this machine, so every CLI stops at its own auth check.**
+**M0 (runtime), M1 (control plane + browser UI) and the core of M3 (agent tasks in isolated worktrees with human-approved, serialized integration) are implemented, tested, and verified end to end in Docker — including the browser UI, real cancellation, real timeouts, and real runs of all three agent CLIs. M2 collaboration is partially done. Session 5 added the worktree/branch reaper (D-038). Session 6 closed the credential exposure: every agent process now runs as the Unix uid of the member whose task it is (D-039), and a credential carries its authentication mode so a Claude subscription can never silently become metered API usage (D-040). Session 7 verified that independently against a live container, committed the work session 6 had left uncommitted, and prepared the repository for GitHub and Vercel. The one thing that has never happened is an *authenticated* agent run: no provider credential exists on this machine, so every CLI stops at its own auth check.**
 
 ## Repository (actual contents)
 
@@ -26,15 +26,21 @@ notea-workspace/
 │                       integration, task transitions, scopes, briefs, credential crypto        [implemented, tested]
 ├── infra/
 │   ├── workspace-image/ Dockerfile (Debian + Node 24 + git + build tools + claude/codex/gemini CLIs + agent)
-│   └── compose/docker-compose.dev.yml   dev Postgres on 127.0.0.1:55432
+│   ├── compose/docker-compose.dev.yml   dev Postgres on 127.0.0.1:55432
+│   └── deploy/          production templates: systemd units, Caddyfile, Postgres compose, vps.env.example
 └── docs/
 ```
 
-## Verified on 2026-09-15 (Windows 11, Node 24, npm 11, Docker Desktop 29.5)
+## Verified on 2026-09-16 (Windows 11, Node 24, npm 11, Docker Desktop 29.5)
 
 | Check | Result |
 |---|---|
 | `npm run typecheck` | OK across all 9 workspaces |
+| `npm test` with `DATABASE_URL` (throw-away `notea_test`) | OK: **167 passed, 3 skipped** — agents 42 · db 1 · protocol 6 · workspace-agent 42 · workspace-client 6 · orchestrator 29 (+3 Docker e2e skipped in this mode) · web 20 · worker 21 |
+| Credential isolation (independent, live container) | OK, re-proved by hand in session 7 rather than trusted from the suite: two processes as uid 20003 and 20004 each holding a distinct marker key. Each reads its own `/proc/<pid>/environ` (so the marker is provably present); **uid 20003 → 20004, uid 20004 → 20003 and `dev` → both all fail with `Permission denied`**. The session-5 attack `grep -a ANTHROPIC_API_KEY /proc/<pid>/environ` no longer returns anything. |
+| Hardening not traded away for it | OK: an agent process reports `CapPrm/CapEff/CapBnd = 0000000000000000`, `NoNewPrivs: 1`; `setpriv --reuid=0` → `Operation not permitted`; `mount -o remount,hidepid=2 /proc` → `must be superuser`. Container still `User=dev`, `CapDrop=[ALL]`, `CapAdd=[]`, `no-new-privileges:true`, `Init=true`, no bind mounts, pids 2048. |
+| Per-member agent HOMEs | OK: `/home/dev/.notea/agents/20003` and `/20004` exist mode `2700`, each owned by its own uid — one member's CLI login is unreadable by the other. |
+| Secrets absent from the database | OK: zero credential-shaped matches across `agent_run_events`, `agent_tasks`, `agent_runs` and `workspace_events`. |
 | `npm test` (no `DATABASE_URL`) | OK, exit 0: agents 31 · protocol 6 · workspace-agent 42 · workspace-client 6 · orchestrator 21 (+1 e2e skipped) · web 13 (+7 skipped) · db and worker skip themselves |
 | `npm test` for `@notea/db` and `@notea/worker` with `DATABASE_URL` | OK: db 1 · worker 17 (task lifecycle, cancellation, stale-run recovery, concurrency limit, integration lease, and the worktree/branch reaper — planner, git collection, execution and the DB-gated skip/reap paths). Run against a throw-away database (`CREATE DATABASE notea_test`), because the worker suite deletes tasks in `beforeEach`. |
 | Reaper (real, in Docker) | OK: run against the demo workspace's live container, it deleted exactly the one merged `done` branch (`notea/task/7c7b3512…`), left the three failed worktrees and branches and `main` untouched, produced a sane `git worktree list`, and a second run was a no-op. |
@@ -57,12 +63,14 @@ Without `DATABASE_URL`, the db/web/worker database suites skip themselves. Witho
 - **Orchestrator**: hardened containers (non-root, cap-drop ALL, no-new-privileges, cpu/mem/pids limits, no bind mounts), HOME volume, `published`/`network` connect modes, connect JWTs, API-key REST, WebSocket bridge, **container recreation on start when the image was rebuilt**, dev console.
 - **Web**: Auth.js credentials (scrypt), server-side membership roles (owner/editor/viewer) on every action, workspaces CRUD, members, terminal tabs (agent sessions badged), CodeMirror editor with conflict detection and change notices, presence, activity, tasks panel (create/approve/cancel/requeue/delete, run event log, policy editor), credentials settings (AES-256-GCM).
 - **Agents**: provider catalog and credential env mapping; `AgentRuntime` interface; Claude Code headless runtime (`claude -p … --output-format stream-json`, parsed defensively); Codex/Gemini/generic runtimes via `GenericCliRuntime`; runs execute in watchable terminal sessions; git worktree per task; brief generator; scope overlap detection; task state machine; serialized integration (rebase → optional check command → fast-forward).
-- **Worker**: polling loop, scope-lease-aware claiming, per-run heartbeat and cancellation, event persistence, auto-commit of leftover changes, review/auto-approve per policy, integration with per-workspace mutex, stale-run recovery.
+- **Worker**: polling loop, scope-lease-aware claiming, per-run heartbeat and cancellation, event persistence, auto-commit of leftover changes, review/auto-approve per policy, integration with per-workspace mutex, stale-run recovery, worktree/branch reaper.
+- **Agent identity (session 6, D-039)**: each user owns a Unix uid (`users.agent_uid`, 20001+); the orchestrator's `POST /workspaces/:id/agent-exec` starts agent processes under it through the Docker daemon (argv only, uid range enforced, gid fixed server-side, `PATH`/`HOME`/`LD_*`/`NOTEA_*` refused, private `0700` HOME, `setsid` so cancellation reaches the CLI's children). `IsolatedAgentSession` implements the existing `WorkspaceSession`/`CommandRunner` interfaces over it, so the runtimes were not changed. `dev` still owns the main tree, creates worktrees and integrates; the shared `dev` group plus `core.sharedRepository=group` and `umask 002` let both work on one project.
+- **Authentication modes (session 6, D-040)**: `provider_credentials.auth_mode` is `subscription` (`CLAUDE_CODE_OAUTH_TOKEN`, from the member's own `claude setup-token`; billed to their Claude plan) or `api_key` (metered). Exactly one variable is ever set and the others are cleared inside the container, because claude-code prefers the OAuth token when both are present. **Settings → AI & Claude** can run `claude auth status --json` inside a real container under the member's own uid and show what the CLI itself reports.
 
 ## Known issues and technical debt
 
 1. **No authenticated agent run has ever succeeded.** The three CLI runtimes have been executed for real against the installed versions (2.1.272 / 0.154.0 / 0.59.0) and their command lines are correct — each starts, is reached by the parser, and fails at the credential boundary (Codex: 401 from `api.openai.com`; Gemini: exit 41, "set an Auth method"; Claude: "Not logged in · Please run /login"). No API key exists on this machine and `provider_credentials` is empty, so this is a missing-credential blocker, not a defect. Store a key under **Credentials** or log a CLI in from a workspace terminal to get past it.
-2. **A collaborator can read the owner's provider key during a run.** Verified, not theoretical: the agent process runs as the same uid as every human shell in the container, so `grep -a ANTHROPIC_API_KEY /proc/<pid>/environ` works. See `SECURITY_MODEL.md` → Provider credentials for the demonstration and the three possible fixes. Until one is implemented, only share a workspace with people you would trust with the key attached to its tasks.
+2. ~~**A collaborator can read the owner's provider key during a run.**~~ **Resolved (session 6, D-039; re-verified independently in session 7.)** Every agent process runs as the task owner's own Unix uid (`users.agent_uid`, 20001+), started by the Docker daemon, so the kernel refuses `/proc/<pid>/environ` across uids. No capability was restored to achieve it. What remains, and is *not* a defect but a property of the design: members of one workspace still share the project files, and the per-workspace `NOTEA_AGENT_TOKEN` is still readable inside the container (blast radius: that one workspace). See `SECURITY_MODEL.md` → Agent identity isolation.
 3. ~~**Deleting a task leaves its worktree and branch in the container.**~~ **Resolved (session 5, D-038).** A worker-side reaper (`apps/worker/src/reaper.ts`, `WORKER_REAP_INTERVAL_MS` default 60 s) removes the worktree and branch of a deleted task (archiving the branch tip to `refs/notea/archive/<id>` first) and the merged branch of an integrated task, while keeping re-runnable and active tasks, in-use worktrees and `main`. Verified against the demo container: it reaped exactly the one leftover `done` branch and was idempotent. Failed tasks still keep their worktree for "Run again", by design.
 4. **No ESLint/Prettier** (D-018).
 5. **Image size** (Node + build tools + three CLIs); a slim variant is possible.
@@ -74,6 +82,19 @@ Without `DATABASE_URL`, the db/web/worker database suites skip themselves. Witho
 11. **Dev console** (`DEV_CONSOLE=true`) mints tokens without auth; keep it off on reachable hosts.
 12. Old server-side artefacts: none known. Sessions do not survive container restarts (by design).
 13. **The npm cache and Docker storage locations are machine-level settings**, not repository settings (`ARCHITECTURE.md` §12). A fresh clone on another machine keeps that machine's defaults; only `.tmp` for tests travels with the repository.
+
+## Deployment status (session 7)
+
+**NOT DEPLOYED — READY FOR VERCEL.** Nothing has been pushed or deployed, and no URL exists.
+
+What is ready: the production `next build` passes (7 routes), `docs/DEPLOYMENT.md` states which half of the product Vercel can host and which half cannot, `infra/deploy/` carries the systemd/Caddy/Postgres/env templates, `.env` is gitignored with only `.env.example` tracked, and a scan of every tracked file found no real credential, private key or machine-specific path.
+
+What is missing, and all of it needs the owner's accounts rather than code:
+
+- **No git remote.** `git remote -v` is empty; `DEPLOYMENT.md` §3 has the two commands.
+- **No Vercel login.** The Vercel CLI is not installed and not authenticated on this machine.
+- **No production Postgres and no production secrets.** `DATABASE_URL`, `AUTH_SECRET`, `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` do not exist for production. Deploying without them would produce a URL that fails on every request, which is why session 7 did not deploy.
+- **No Linux host** for the orchestrator, worker, Docker and workspace containers. Vercel cannot host these: they need the Docker socket, hours-long WebSocket connections and a persistent disk. `DEPLOYMENT.md` §1 has the topology and §5 the VPS procedure.
 
 ## Host disk: incident (session 2) and resolution (session 3)
 
@@ -92,5 +113,6 @@ Not moved, and why: `C:\Users\<user>\.claude` (240 MB) and `.codex` (840 MB) bel
 - **Docker's data disk lives on D: (`D:\DockerDesktop\wsl`), not on C:.** It is shared with that other project. Change it only through the Docker Desktop GUI; see `ARCHITECTURE.md` §12.
 - The npm cache is `D:\NoteaWorkspaceData\npm-cache` (user-level `cache=` in `C:\Users\<user>\.npmrc`). To undo: `npm config delete cache`.
 - Pre-migration backups are kept at `D:\NoteaWorkspaceData\backups`: a `pg_dump` of the dev database, a tar of the workspace HOME volume, and the original `settings-store.json`. They are point-in-time copies from 2026-09-15 and are not refreshed automatically.
-- Local users created by the `create-user` script: `andrej@notea.local` and `collaborator@notea.local`, password `notea-dev-password` (change them).
+- Local users: `andrej@notea.local` and `collaborator@notea.local` (session 1, from `create-user`), plus `andrej@notea.mk` (Andrej, agent uid 20003) and `niche@notea.mk` (Niche, agent uid 20004) from `npm run seed:dev -w @notea/web`. Development passwords only — change them anywhere reachable.
+- A throw-away `notea_test` database exists on the same Postgres for the db/worker/web suites, because the worker suite deletes tasks in `beforeEach`. Never point those suites at `notea`.
 - A `demo-project` workspace exists in the dev database; its container is `notea-ws-ebc7f427-1561-4fe5-8103-efda876f0a7d` (start/stop from the UI).
