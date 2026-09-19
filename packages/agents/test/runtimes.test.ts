@@ -112,6 +112,129 @@ describe('parseClaudeStreamLine', () => {
     expect(parseClaudeStreamLine('{not json')).toMatchObject([{ type: 'log' }]);
     expect(parseClaudeStreamLine('')).toEqual([]);
   });
+
+  /**
+   * Records captured verbatim from claude-code 2.1.272 running headless *with* a
+   * credential on 2026-09-19 (subscription mode, `CLAUDE_CODE_OAUTH_TOKEN` only),
+   * as uid 20003 inside a real workspace container on Ubuntu 26.04. The
+   * unauthenticated counterparts are above; these are the shapes a run that gets
+   * past authentication actually produces, and three of them did not appear in any
+   * earlier fixture:
+   *
+   *   - `thinking` content blocks (extended thinking is on by default),
+   *   - `user` records carrying `tool_result`,
+   *   - `rate_limit_event`, a top-level record type the parser has never seen named.
+   *
+   * None of them may produce a spurious event: a `thinking` block is not a message,
+   * a `tool_result` is not a tool call, and an unknown record is a debug log. This
+   * test pins that, because a stray `message` here would land in the run log the
+   * user reads, and a stray `tool_call` would misreport what the agent did.
+   */
+  it('parses the records an authenticated run actually emits', () => {
+    // Extended thinking: real content, but nothing the run log should show.
+    expect(
+      parseClaudeStreamLine(
+        JSON.stringify({
+          type: 'assistant',
+          message: { content: [{ type: 'thinking', thinking: 'The user wants me to run a command.', signature: 'Eq4BCkYIBxgC...' }] },
+        }),
+      ),
+    ).toEqual([]);
+
+    // A real tool call. `input` carries the CLI's own `description` alongside the
+    // command, and Bash writes no file, so there must be no `file_changed`.
+    expect(
+      parseClaudeStreamLine(
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_01Nqz67sVnjr9skQoR7gYyYS',
+                name: 'Bash',
+                input: { command: 'notea-fixture', description: 'Run the notea-fixture command' },
+              },
+            ],
+          },
+        }),
+      ),
+    ).toMatchObject([{ type: 'tool_call', name: 'Bash', input: { command: 'notea-fixture', description: 'Run the notea-fixture command' } }]);
+
+    // The tool's output comes back as a `user` record. It is not a message from the
+    // user, and a failing tool (`is_error`) must not fail the run on its own.
+    expect(
+      parseClaudeStreamLine(
+        JSON.stringify({
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_01Nqz67sVnjr9skQoR7gYyYS',
+                is_error: true,
+                content: 'Exit code 127\n/bin/bash: line 1: notea-fixture: command not found',
+              },
+            ],
+          },
+        }),
+      ),
+    ).toEqual([]);
+
+    expect(parseClaudeStreamLine(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } }))).toMatchObject([
+      { type: 'message', role: 'assistant', text: 'done' },
+    ]);
+
+    // The authenticated `result`. Far more fields than the unauthenticated one, and
+    // `usage` now reports cache tokens — only `input_tokens`/`output_tokens` are read,
+    // so the cache counters must not be mistaken for them.
+    expect(
+      parseClaudeStreamLine(
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'done',
+          num_turns: 2,
+          duration_ms: 6859,
+          total_cost_usd: 0.048_563_600_000_000_005,
+          stop_reason: 'end_turn',
+          terminal_reason: 'completed',
+          api_error_status: null,
+          usage: {
+            input_tokens: 4,
+            output_tokens: 176,
+            cache_creation_input_tokens: 9157,
+            cache_read_input_tokens: 45_968,
+            output_tokens_details: { thinking_tokens: 89 },
+            service_tier: 'standard',
+          },
+        }),
+      ),
+    ).toMatchObject([
+      { type: 'usage', inputTokens: 4, outputTokens: 176, costUsd: 0.048_563_600_000_000_005 },
+      { type: 'finished', outcome: 'completed', summary: 'done' },
+    ]);
+
+    // Unknown top-level records degrade to a debug log rather than being dropped or
+    // mistaken for output. `rate_limit_event` arrives mid-run on a subscription.
+    expect(
+      parseClaudeStreamLine(
+        JSON.stringify({
+          type: 'rate_limit_event',
+          rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', resetsAt: 1_789_856_400, isUsingOverage: false },
+        }),
+      ),
+    ).toMatchObject([{ type: 'log', level: 'debug' }]);
+
+    // `system` init on a subscription reports no API-key source: the OAuth token is
+    // what authenticated, which is exactly what `auth_mode: subscription` promises.
+    expect(
+      parseClaudeStreamLine(
+        JSON.stringify({ type: 'system', subtype: 'init', apiKeySource: 'none', permissionMode: 'bypassPermissions', model: 'claude-sonnet-5', claude_code_version: '2.1.272' }),
+      ),
+    ).toMatchObject([{ type: 'log', level: 'debug', text: 'system init' }]);
+  });
 });
 
 describe('CodexRuntime', () => {
@@ -234,6 +357,81 @@ describe('ClaudeCodeRuntime', () => {
     expect(finished[0]).toMatchObject({ outcome: 'failed', summary: notLoggedIn });
     // The worker keeps the last finished event, so that one must carry the reason too.
     expect(finished.at(-1)).toMatchObject({ outcome: 'failed', exitCode: 1, summary: notLoggedIn });
+    client.close();
+  });
+
+  /**
+   * The authenticated counterpart of the test above, replayed from the stream a real
+   * run emitted on 2026-09-19 (claude-code 2.1.272, subscription credential, uid
+   * 20003, Ubuntu 26.04). The interleaving is what matters here rather than any one
+   * record: `thinking` and `tool_result` sit between the events that do count, and a
+   * `rate_limit_event` arrives mid-stream, so the ordered event list is the assertion
+   * that a future parser change cannot quietly alter what the run log shows.
+   */
+  it('reports an authenticated run as completed with the CLI’s own usage figures', async () => {
+    const client = new WorkspaceClient({ url: `ws://127.0.0.1:${port}/ws?token=${TOKEN}`, WebSocketImpl: identifyingWebSocket() });
+    await client.waitForHello();
+    const runtime = new ClaudeCodeRuntime();
+
+    const startPromise = runtime.start(ctx, new ClientWorkspaceSession(client));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    procs[0]?.emitExit(0);
+    const handle = await startPromise;
+
+    const collected: AgentRunEvent[] = [];
+    const consume = (async () => {
+      for await (const event of handle.events) collected.push(event);
+    })();
+
+    const emit = (record: unknown) => ptys[0]?.emitData(JSON.stringify(record) + '\r\n');
+    emit({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-sonnet-5', claude_code_version: '2.1.272' });
+    emit({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour' } });
+    emit({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Plan the edit.', signature: 'Eq4BCkYIBxgC...' }] } });
+    emit({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'toolu_01Nqz', name: 'Write', input: { file_path: '/home/dev/.notea/worktrees/t1/MIGRATION.md', content: '# Migration\n' } }] },
+    });
+    emit({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_01Nqz', content: 'File created successfully.' }] } });
+    emit({ type: 'system', subtype: 'thinking_tokens' });
+    emit({ type: 'assistant', message: { content: [{ type: 'text', text: 'Created `MIGRATION.md`.' }] } });
+    emit({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'Created `MIGRATION.md`.',
+      num_turns: 2,
+      total_cost_usd: 0.073_584_2,
+      usage: { input_tokens: 8, output_tokens: 719, cache_read_input_tokens: 45_968 },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    ptys[0]?.emitExit(0);
+    await consume;
+
+    // `thinking` and `tool_result` contribute nothing; Write reports the file it wrote.
+    expect(collected.map((e) => e.type)).toEqual([
+      'started',
+      'log', // system init
+      'log', // rate_limit_event
+      'tool_call',
+      'file_changed',
+      'log', // system thinking_tokens
+      'message',
+      'usage',
+      'finished',
+      'log', // process exited
+    ]);
+    expect(collected.find((e) => e.type === 'file_changed')).toMatchObject({ path: '/home/dev/.notea/worktrees/t1/MIGRATION.md' });
+    // The cache counters must not be read as the billed token counts.
+    expect(collected.find((e) => e.type === 'usage')).toMatchObject({ inputTokens: 8, outputTokens: 719, costUsd: 0.073_584_2 });
+
+    // Note the asymmetry with the unauthenticated case above, which ends with *two*
+    // `finished` events: there the CLI exits non-zero and the runtime appends a
+    // second one carrying `exitCode: 1`. A clean exit adds nothing, so the single
+    // `finished` parsed from the `result` record stands, and its `exitCode` is null —
+    // which is why `agent_runs.exit_code` is null for a successful run.
+    const finished = collected.filter((e) => e.type === 'finished');
+    expect(finished).toHaveLength(1);
+    expect(finished[0]).toMatchObject({ outcome: 'completed', exitCode: null, summary: 'Created `MIGRATION.md`.' });
     client.close();
   });
 
