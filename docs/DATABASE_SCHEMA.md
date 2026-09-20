@@ -17,7 +17,7 @@ distinct per user, stable for the user's lifetime, and clear of the image's `dev
 (uid 1000). See `SECURITY_MODEL.md` → Agent identity isolation and D-039.
 
 ### workspaces
-id (= orchestrator workspaceId) · slug (unique) · name · owner_id → users · image (default `notea/workspace:dev`) · resources jsonb · repo_url · last_known_status · **coordination_policy jsonb** `{overlap: 'warn'|'block', integration: 'auto'|'human', checkCommand: string|null, baseBranch: string}` (defaults: block, human, null, main) · created_at · updated_at · deleted_at (soft delete). Index on owner_id.
+id (= orchestrator workspaceId) · slug (unique) · name · owner_id → users · image (default `notea/workspace:dev`) · resources jsonb · repo_url (**vestigial — no code writes or reads it**; workspaces are created with a name and slug only, and the project is cloned by hand from a terminal) · last_known_status · **coordination_policy jsonb** `{overlap: 'warn'|'block', integration: 'auto'|'human', checkCommand: string|null, baseBranch: string}` (defaults: block, human, null, main) · created_at · updated_at · deleted_at (soft delete). Index on owner_id.
 
 ### workspace_members
 (workspace_id, user_id) pk · role enum `workspace_role` (owner|editor|viewer) · invited_by · created_at. Index on user_id. The owner always has an `owner` row.

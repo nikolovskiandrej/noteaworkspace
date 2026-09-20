@@ -2,7 +2,7 @@
 
 Status vocabulary used across all docs: **planned** (agreed, no code), **designed** (concrete design written, no code), **partially implemented**, **implemented** (code exists), **tested** (automated tests pass), **broken**, **postponed**.
 
-Last updated: 2026-09-15 (Fable 5.1 session 1).
+Last updated: 2026-09-20 (session 8). §6 and §7 were checked against the code in session 8; the status words there had been left at session 1's values long after the code caught up.
 
 ## 1. One sentence
 
@@ -43,21 +43,22 @@ A shared live AI engineering workspace:
 | **Workspace runtime** | The Docker container plus named volume that realise a workspace. Managed by the orchestrator. |
 | **Workspace agent** | A small daemon inside every workspace container. Owns PTYs, file operations and presence. `packages/workspace-agent`. |
 | **Orchestrator** | The runtime service on the Docker host: creates/starts/stops containers and bridges browser WebSockets to workspace agents. `apps/orchestrator`. |
-| **Control plane** | The web application: users, auth, workspace metadata, memberships, tasks, activity. Talks to the orchestrator over an internal REST API. `apps/web` (planned). |
+| **Control plane** | The web application: users, auth, workspace metadata, memberships, tasks, activity. Talks to the orchestrator over an internal REST API. `apps/web`. Implemented. |
 | **Participant / client** | Any connection to a workspace: a human in a browser or an AI agent runner. Both carry an identity `{userId, name, kind, role}`. |
 | **Role** | `owner`, `editor`, `viewer`. Viewers can watch terminals and read files but not type or write. |
 | **Terminal session** | A PTY running inside the workspace. Sessions outlive browser connections; several participants can attach to one session. |
-| **Agent runtime** | An adapter that runs an AI coding agent (for example the Claude Code CLI) inside a workspace for a task. Designed, not implemented. |
-| **Provider / model / credential** | Where a model comes from (Anthropic, OpenAI, Google), which model, and whose key. Designed, not implemented. |
-| **Task** | A unit of agent work with a description, a scope (paths), a branch/worktree and a status. Designed. |
-| **Integration queue** | Serialised merge of finished task branches into the main tree with checks. Designed. |
-| **Activity feed** | Time-ordered record of who did what in a workspace (human and agent). Designed. |
+| **Agent runtime** | An adapter that runs an AI coding agent (for example the Claude Code CLI) inside a workspace for a task. Implemented: `claude-code-cli`, `codex-cli`, `gemini-cli`, `generic-cli`. |
+| **Provider / model / credential** | Where a model comes from (Anthropic, OpenAI, Google), which model, and whose key. Implemented: `provider_credentials`, per user, encrypted, with an `auth_mode` that decides billing (D-040). |
+| **Task** | A unit of agent work with a description, a scope (paths), a branch/worktree and a status. Implemented: `agent_tasks` + the state machine in `packages/agents`. |
+| **Integration queue** | Serialised merge of finished task branches into the main tree with checks. Implemented — as task statuses plus a per-workspace integration lease, not as a queue table. |
+| **Activity feed** | Time-ordered record of who did what in a workspace (human and agent). Implemented: `workspace_events`, shown in the workspace UI. |
 
 ## 7. Target user flow
 
 1. Open Notea Workspace, sign in.
-2. Create a workspace (name, optional git repository URL, base image).
+2. Create a workspace: **a name, and optionally a slug — that is all the code accepts** (`createWorkspace` in `apps/web/src/lib/workspaces.ts`). There is no repository-URL field and no image picker; the image comes from the `workspaces.image` column default. The `workspaces.repo_url` column exists but is never written or read by any code path, so a new workspace starts with an **empty** `/home/dev/project`.
 3. The orchestrator creates a container + volume; the workspace agent starts inside it.
+3a. You populate the project yourself, from a terminal in the workspace (`git clone …` into `/home/dev/project`). Cloning on creation is not implemented.
 4. Enter the workspace: file tree on the left, editor in the middle, terminals at the bottom, presence and activity on the right.
 5. Open a terminal; it is a real login shell as user `dev` in `/home/dev/project`.
 6. Edit files; run the app; see it in a preview tab (preview proxying is a later milestone).
