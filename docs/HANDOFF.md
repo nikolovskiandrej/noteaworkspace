@@ -1,6 +1,6 @@
 # Notea Workspace — Handoff
 
-Written 2026-09-15, updated at the end of session 8 (migration from Windows 11 to Ubuntu 26.04). Self-contained; the conversation is not needed. Read `CURRENT_STATE.md` next, then `ARCHITECTURE.md`, `AGENT_SYSTEM.md`, `DECISIONS.md`, `SECURITY_MODEL.md`, `DEPLOYMENT.md`.
+Written 2026-09-15, updated at the end of session 9 (pre-deployment preparation); session 8 migrated development from Windows 11 to Ubuntu 26.04. Self-contained; the conversation is not needed. Read `CURRENT_STATE.md` next, then `ARCHITECTURE.md`, `AGENT_SYSTEM.md`, `DECISIONS.md`, `SECURITY_MODEL.md`, `DEPLOYMENT.md`.
 
 ## 1. Product summary
 
@@ -41,7 +41,7 @@ Previews (port detection + proxy), deployment tooling (compose prod, Caddy), inv
 
 ## 9. Database
 
-`DATABASE_SCHEMA.md`. Tables: users, workspaces (with `coordination_policy`), workspace_members, workspace_events, provider_credentials, agent_tasks, agent_runs, agent_run_events. Migrations `packages/db/drizzle/0000_*.sql`, `0001_*.sql`; apply with `npm run migrate -w @notea/db`.
+`DATABASE_SCHEMA.md`. Tables: users, workspaces (with `coordination_policy`), workspace_members, workspace_events, provider_credentials, agent_tasks, agent_runs, agent_run_events. Migrations `packages/db/drizzle/0000_*.sql` … `0004_*.sql` (five); apply with `npm run migrate -w @notea/db`. All five are applied to the deployed Neon database.
 
 ## 10–12. Runtime, terminal, realtime
 
@@ -61,7 +61,7 @@ Unchanged from session 1 (`ARCHITECTURE.md` §4–6) plus: exec processes bound 
 
 ## 18. Known bugs
 
-None open. Session 8 found none: the migration to Linux required no source change, and the three fixes it did make were working-copy file modes, three Windows leftovers in `.git/config`, and `0600` on the files holding secrets. Session 6 closed the `/proc` credential exposure architecturally (D-039) and separated subscription from API billing (D-040); session 7 re-proved the isolation by hand against a live container and fixed the one defect that work left behind — `ensureSharedLayout` ran `chmod -R g+rwX .git`, which fails as soon as an agent uid owns objects in `.git`, taking the run with it (now `find .git -user "$(id -u)"`). Session 5 resolved the worktree/branch leak (formerly technical debt) with a worker-side reaper, verified against the live container (D-038). Fixed in session 4, each with tests: connect tokens written to the orchestrator log (D-033); the worker exceeding its concurrency limit (D-034); the integration lease released while another task still needed it (D-035); a lost terminal-exit notification hanging a run forever (D-036); an overridden failure losing the CLI's explanation (D-037). Earlier sessions: Next 16 `allowedDevOrigins`, provider constructed during SSR, proxy matcher export name, stale container image after rebuild.
+None open. Session 9 fixed one that only production would have shown: the worker registered its SIGTERM/SIGINT handlers *after* its infinite poll loop, so they were unreachable and `systemctl stop|restart notea-worker` abandoned in-flight runs (`CURRENT_STATE.md` → Session 9). Session 8 found none: the migration to Linux required no source change, and the three fixes it did make were working-copy file modes, three Windows leftovers in `.git/config`, and `0600` on the files holding secrets. Session 6 closed the `/proc` credential exposure architecturally (D-039) and separated subscription from API billing (D-040); session 7 re-proved the isolation by hand against a live container and fixed the one defect that work left behind — `ensureSharedLayout` ran `chmod -R g+rwX .git`, which fails as soon as an agent uid owns objects in `.git`, taking the run with it (now `find .git -user "$(id -u)"`). Session 5 resolved the worktree/branch leak (formerly technical debt) with a worker-side reaper, verified against the live container (D-038). Fixed in session 4, each with tests: connect tokens written to the orchestrator log (D-033); the worker exceeding its concurrency limit (D-034); the integration lease released while another task still needed it (D-035); a lost terminal-exit notification hanging a run forever (D-036); an overridden failure losing the CLI's explanation (D-037). Earlier sessions: Next 16 `allowedDevOrigins`, provider constructed during SSR, proxy matcher export name, stale container image after rebuild.
 
 ## 19. Technical debt
 
@@ -73,7 +73,9 @@ None open. Session 8 found none: the migration to Linux required no source chang
 
 The credential blocker is **closed**: a Claude subscription token is stored for `andrej@notea.mk` and has now driven two authenticated runs end to end — the first on Windows (§23a) and a second on Linux after the migration (§23). The stored credential survived the move and needed no re-authentication. Anthropic is covered; **OpenAI and Google still have no credential**, so Codex and Gemini runs still stop at their own auth checks — a missing credential, not a defect. **Niche has no credential either**, so the two-member-two-accounts case is built and unit-tested but has never run for real.
 
-**The control plane is deployed; the runtime host is not.** `apps/web` is live at https://noteaworkspace-web.vercel.app against a Neon Postgres, and the repository is at https://github.com/nikolovskiandrej/noteaworkspace. What is still missing is a **Linux host running the orchestrator, the worker and Docker** — without it a workspace cannot start, so terminals, the editor and agent tasks are unavailable on the deployed URL. `ORCHESTRATOR_URL` and `ORCHESTRATOR_PUBLIC_URL` are the placeholder `https://orchestrator.example.com` and must be pointed at that host (`DEPLOYMENT.md` §5) before anything beyond sign-in works.
+**The control plane is deployed; the runtime host is not.** `apps/web` is live at https://noteaworkspace-web.vercel.app against a Neon Postgres, and the repository is at https://github.com/nikolovskiandrej/noteaworkspace. What is still missing is a **Linux host running the orchestrator, the worker and Docker** — without it a workspace cannot start, so terminals, the editor and agent tasks are unavailable on the deployed URL. `ORCHESTRATOR_URL` and `ORCHESTRATOR_PUBLIC_URL` are the placeholder `https://orchestrator.example.com` and must be pointed at that host and **redeployed** (`DEPLOYMENT.md` §5 step 9) before anything beyond sign-in works.
+
+Session 8 prepared everything that could be prepared without the host (`CURRENT_STATE.md` → Session 8). Two things still need the owner's accounts: a domain, and reading `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` out of the Vercel project — the host must reuse those exact values, and generating new ones breaks the deployed control plane.
 
 ## 21. Tested / 22. Not tested
 

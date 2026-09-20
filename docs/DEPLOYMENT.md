@@ -1,10 +1,14 @@
 # Notea Workspace — Deployment
 
-Last updated: 2026-09-15 (session 6). Status: **prepared, not yet deployed.** No Vercel or
-GitHub credentials exist on the development machine, so nothing here has been pushed or
-deployed; every step below is written to be run by the owner. What *has* been verified is
-the software itself (see `CURRENT_STATE.md`): the production `next build`, the full test
+Last updated: 2026-09-20 (session 8). Status: **the control plane is deployed; the runtime
+host is not.** `apps/web` is live on Vercel against a Neon Postgres and the repository is on
+GitHub, so §3 and §4 are a record of what was done, not work to repeat. §5 (the Linux host)
+is the outstanding half, and until it exists nothing past sign-in works. What is verified in
+the software itself is in `CURRENT_STATE.md`: the production `next build`, the full test
 suite, the Docker end-to-end suite and the two-member agent flow.
+
+**Before §5, read §2's COPY note.** `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` already
+exist on the Vercel project; the host must reuse those exact values.
 
 ## 1. What runs where
 
@@ -45,6 +49,13 @@ Generate every secret with `openssl rand -hex 32`. Never reuse a development val
 production, and never commit a `.env`. Templates with the exact variable names are in
 `infra/deploy/`.
 
+**Two values are copied, not generated.** `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` are
+already set on the deployed Vercel project, and both sides must match. Generating fresh
+ones on the host means the orchestrator rejects every call from the web app with 401, and a
+new `CREDENTIALS_KEY` makes every stored provider credential permanently undecryptable.
+Read them out of Vercel first (Project → Settings → Environment Variables → reveal, or
+`vercel env pull`) and paste those exact values into the host's `.env`.
+
 ### Vercel project (`apps/web`)
 
 | Variable | Value | Generate? |
@@ -53,8 +64,8 @@ production, and never commit a `.env`. Templates with the exact variable names a
 | `AUTH_SECRET` | Auth.js session signing secret | **yes** |
 | `ORCHESTRATOR_URL` | `https://orchestrator.example.com` (server-to-server, REST) | your domain |
 | `ORCHESTRATOR_PUBLIC_URL` | same URL; browsers derive `wss://` from it for terminals | your domain |
-| `ORCHESTRATOR_API_KEY` | must equal the orchestrator's value | **yes** (shared) |
-| `CREDENTIALS_KEY` | 64 hex chars; encrypts stored provider credentials; must equal the worker's value | **yes** (shared) |
+| `ORCHESTRATOR_API_KEY` | must equal the orchestrator's value | **set — copy to the host** |
+| `CREDENTIALS_KEY` | 64 hex chars; encrypts stored provider credentials; must equal the worker's value | **set — copy to the host** |
 | `AUTH_URL` | optional; the public URL of the web app if Vercel's auto-detection is not right | your domain |
 
 ### Orchestrator (VPS, `/opt/notea-workspace/.env`)
@@ -63,14 +74,14 @@ production, and never commit a `.env`. Templates with the exact variable names a
 |---|---|---|
 | `PORT` | `4100` | — |
 | `HOST` | `127.0.0.1` — only Caddy reaches it | — |
-| `ORCHESTRATOR_API_KEY` | same as Vercel/worker | **yes** |
+| `ORCHESTRATOR_API_KEY` | same as Vercel/worker | **copy from Vercel** |
 | `CONNECT_TOKEN_SECRET` | ≥ 32 chars | **yes** |
 | `AGENT_TOKEN_SECRET` | ≥ 32 chars; rotating it means recreating containers | **yes** |
 | `WORKSPACE_IMAGE` | `notea/workspace:dev` (built on the VPS with `npm run build:image`) | — |
 | `WORKSPACE_NETWORK` | `notea-workspaces` | — |
 | `AGENT_CONNECT_MODE` | `network` on Linux (see §6 caveat); `published` is the mode verified in development | — |
 | `AGENT_UID_MIN` / `AGENT_UID_MAX` / `AGENT_GID` | defaults `20001` / `29999` / `1000`; per-member agent uids (`SECURITY_MODEL.md`) | — |
-| `WORKSPACE_DEFAULT_CPUS` / `_MEMORY_MB` / `_PIDS_LIMIT` | size to the host | — |
+| `WORKSPACE_DEFAULT_CPUS` / `_MEMORY_MB` / `_PIDS_LIMIT` | `2` / `3072` / `2048` on a 4 vCPU / 8 GB host; size up with the host (§5) | — |
 | `DEV_CONSOLE` | **`false`** — it mints tokens without authentication | — |
 | `LOG_LEVEL` | `info` | — |
 
@@ -80,10 +91,10 @@ production, and never commit a `.env`. Templates with the exact variable names a
 |---|---|---|
 | `DATABASE_URL` | same database as the web app (a direct, non-pooled URL is fine here) | provider |
 | `ORCHESTRATOR_URL` | `http://127.0.0.1:4100` when co-located | — |
-| `ORCHESTRATOR_API_KEY` | same as above | **yes** (shared) |
-| `CREDENTIALS_KEY` | same as Vercel | **yes** (shared) |
-| `WORKER_MAX_CONCURRENT_RUNS` | `3` | — |
-| `WORKER_POLL_INTERVAL_MS` / `WORKER_REAP_INTERVAL_MS` | `2000` / `60000` | — |
+| `ORCHESTRATOR_API_KEY` | same as above | **copy from Vercel** |
+| `CREDENTIALS_KEY` | same as Vercel | **copy from Vercel** |
+| `WORKER_MAX_CONCURRENT_RUNS` | `2` on a 4 vCPU / 8 GB host | — |
+| `WORKER_POLL_INTERVAL_MS` / `WORKER_REAP_INTERVAL_MS` | `15000` / `60000`. Every tick queries Postgres, so this is what keeps a managed database awake — at `2000` a Neon compute can never scale to zero. `15000` stays well inside the 2-minute stale-run cutoff and the 15 s run heartbeat | — |
 
 ### Local development
 
@@ -92,21 +103,23 @@ holds `NOTEA_DEV_PASSWORD` / `NOTEA_DEV_USERS` / `NOTEA_DEV_WORKSPACE` for
 `npm run seed:dev -w @notea/web`, which are **development-only** and must not exist in
 production.
 
-## 3. Tomorrow: GitHub
+## 3. GitHub (done)
 
-The repository has no remote yet. From the repository root:
+The remote exists: **https://github.com/nikolovskiandrej/noteaworkspace**, over HTTPS, branch
+`main`. Pushing is just `git push`. Before any push, `git ls-files | grep -E '^\.env$'` must
+print nothing (it does: `.env` is ignored and only `.env.example` is tracked). The tracked
+test files contain obviously fake credential *shapes* (`sk-ant-api03-abcdefghijklmnop`);
+nothing real.
 
-```bash
-git status                       # must be clean
-git remote add origin git@github.com:<your-account>/notea-workspace.git
-git push -u origin main
-```
+**How the VPS authenticates: a read-only deploy key.** Not a PAT. A deploy key is scoped to
+this one repository, the private half is generated on the host and never leaves it, and
+revoking it touches nothing else; a PAT — even fine-grained — is an account credential that
+expires and has to be rotated. Read-only is enough because the host only ever pulls (§7);
+agent commits happen inside the workspace container, against the clone on its own volume,
+which never talks to GitHub. Do not grant the key write access, and do not copy it into a
+container. §5 step 3 generates it.
 
-Before pushing, `git ls-files | grep -E '^\.env$'` must print nothing (it does: `.env` is
-ignored and only `.env.example` is tracked). The tracked test files contain
-obviously fake credential *shapes* (`sk-ant-api03-abcdefghijklmnop`); nothing real.
-
-## 4. Tomorrow: Vercel (web app)
+## 4. Vercel, web app (done — recorded for reference)
 
 1. Vercel → **Add New… → Project** → import `notea-workspace`.
 2. **Root Directory:** `apps/web`. Keep *"Include source files outside of the Root
@@ -131,10 +144,20 @@ vercel --prod
 The web app will build and sign-in will work as soon as `DATABASE_URL` and `AUTH_SECRET`
 are set. Workspaces, terminals and tasks additionally need the orchestrator (§5).
 
-## 5. Tomorrow: the Linux host (orchestrator, worker, Postgres)
+## 5. The Linux host (orchestrator, worker) — the outstanding half
 
-Ubuntu 24.04 (or any Linux with Docker Engine and Node 24). One 4 vCPU / 8 GB host is
-enough for a handful of workspaces at the default 2 CPU / 4 GB per container.
+Ubuntu 24.04 (or any Linux with Docker Engine and Node 24). A 4 vCPU / 8 GB host runs
+**one** workspace comfortably at the shipped 2 CPU / 3 GB per container, with roughly 1 GB
+going to the host itself (Docker, Caddy, orchestrator, worker). A container's memory limit
+is a cap, not a reservation: two workspaces are each entitled to their full 3 GB, so they
+can exhaust the host before either hits its own limit, and the kernel then picks the
+victim — which may be the orchestrator rather than a container. Add 4 GB of swap (cloud
+images usually ship with none) so a spike degrades instead of being killed, and size up the
+host before running two busy workspaces at once.
+
+`caddy` is not in every Ubuntu release's default repositories, and where it is it lags:
+check `apt-cache policy caddy` before step 1 and add Caddy's own repository if it comes
+back empty.
 
 ```bash
 # 1. system packages
@@ -146,22 +169,36 @@ curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-ge
 sudo useradd -r -m -d /opt/notea-workspace -s /bin/bash notea
 sudo usermod -aG docker notea
 
-# 3. the code
-sudo -iu notea bash -c 'git clone git@github.com:<your-account>/notea-workspace.git /opt/notea-workspace/app'
+# 3a. a read-only deploy key for this repository (§3), generated on the host
+sudo -iu notea install -d -m 700 /opt/notea-workspace/.ssh
+sudo -iu notea ssh-keygen -t ed25519 -N '' -C 'notea-vps' -f /opt/notea-workspace/.ssh/id_ed25519
+sudo -u notea cat /opt/notea-workspace/.ssh/id_ed25519.pub
+#    Paste that public key at GitHub → the repository → Settings → Deploy keys →
+#    Add deploy key. Leave "Allow write access" UNCHECKED. The private half stays here.
+sudo -iu notea bash -c 'ssh -o StrictHostKeyChecking=accept-new -T git@github.com; true'
+
+# 3b. the code
+sudo -iu notea bash -c 'git clone git@github.com:nikolovskiandrej/noteaworkspace.git /opt/notea-workspace/app'
 cd /opt/notea-workspace/app
-sudo -u notea npm ci
+sudo -u notea npm ci                             # `node-pty` may warn: harmless, the host never uses it
 sudo -u notea npm run build:image                # builds notea/workspace:dev on this host (a few minutes)
 
 # 4. configuration (mode 600, owned by notea)
 sudo -u notea cp infra/deploy/vps.env.example /opt/notea-workspace/app/.env
 sudo -u notea chmod 600 /opt/notea-workspace/app/.env
-sudo -u notea "${EDITOR:-nano}" /opt/notea-workspace/app/.env     # fill every "generate" value
+sudo -u notea "${EDITOR:-nano}" /opt/notea-workspace/app/.env
+#    Fill every GENERATE value, paste the two COPY values from Vercel (§2), and replace
+#    DATABASE_URL with the managed database's direct URL — the template's 127.0.0.1 line
+#    is only a shape, and leaving it makes the worker crash-loop on ECONNREFUSED.
 
-# 5. database (skip if you use a managed Postgres: just set DATABASE_URL)
+# 5. database — ONLY for a Postgres on this host. With the web app on Vercel the database
+#    is managed and already migrated, so skip both lines and just set DATABASE_URL.
+#    A *fresh* managed database still needs the migrate line, run from this directory.
 sudo -u notea docker compose -p notea -f infra/deploy/docker-compose.postgres.yml up -d
 sudo -u notea npm run migrate -w @notea/db
 
-# 6. the first account (production has no self sign-up)
+# 6. the first account (production has no self sign-up) — already exists on the deployed
+#    database; only for a fresh one.
 sudo -u notea npm run create-user -w @notea/web -- you@example.com "Your Name" '<a strong password>'
 
 # 7. services
@@ -175,8 +212,17 @@ sudo cp infra/deploy/Caddyfile.example /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
-Open only ports 22 and 443 in the firewall. Point `orchestrator.example.com` at the
-host's IP; Caddy obtains the certificate and proxies WebSockets automatically.
+Open ports 22, 80 and 443 in the firewall. 80 is not strictly required — Caddy falls back
+to the TLS-ALPN-01 challenge on 443 — but without it the HTTP-01 challenge and the
+automatic http→https redirect both fail. Point `orchestrator.<your-domain>` at the host's
+IPv4 address before reloading Caddy; it obtains the certificate and proxies WebSockets
+automatically.
+
+**9. Point the web app at this host.** `ORCHESTRATOR_URL` and `ORCHESTRATOR_PUBLIC_URL` on
+Vercel are still the placeholder `https://orchestrator.example.com`. Set both to
+`https://orchestrator.<your-domain>` and **redeploy** — changing an environment variable
+does not affect the deployment already running. Until this is done §6 fails with
+`orchestrator unreachable`, however healthy the host is.
 
 ## 6. Verify the live system
 

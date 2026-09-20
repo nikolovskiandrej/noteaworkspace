@@ -14,6 +14,9 @@ EnvironmentFile=/opt/notea-workspace/app/.env
 ExecStart=/usr/bin/npm run start -w @notea/worker
 Restart=always
 RestartSec=5
+# On stop the worker drains its in-flight runs before closing the pool; give it
+# room to do so. A run that outlasts this is killed and recovered as a stale run.
+TimeoutStopSec=120
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

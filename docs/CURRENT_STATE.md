@@ -1,6 +1,6 @@
 # Notea Workspace — Current State
 
-Last updated: 2026-09-19, end of session 8 (migration from Windows 11 to Ubuntu 26.04). Update this file whenever reality changes.
+Last updated: 2026-09-22, end of session 9 (pre-deployment preparation). Session 8 (2026-09-19) migrated development from Windows 11 to Ubuntu 26.04 and is recorded below. Update this file whenever reality changes.
 
 ## One-line status
 
@@ -122,12 +122,24 @@ Two dependency defects were found by deploying and are fixed (`717aa95`, `2338bc
 
 What is ready: the production `next build` passes (7 routes), `docs/DEPLOYMENT.md` states which half of the product Vercel can host and which half cannot, `infra/deploy/` carries the systemd/Caddy/Postgres/env templates, `.env` is gitignored with only `.env.example` tracked, and a scan of every tracked file found no real credential, private key or machine-specific path.
 
-What is missing, and all of it needs the owner's accounts rather than code:
+What is missing (the list below replaces session 7's, which was written before the Vercel
+deployment happened and then contradicted the paragraph above it):
 
-- **No git remote.** `git remote -v` is empty; `DEPLOYMENT.md` §3 has the two commands.
-- **No Vercel login.** The Vercel CLI is not installed and not authenticated on this machine.
-- **No production Postgres and no production secrets.** `DATABASE_URL`, `AUTH_SECRET`, `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` do not exist for production. Deploying without them would produce a URL that fails on every request, which is why session 7 did not deploy.
-- **No Linux host** for the orchestrator, worker, Docker and workspace containers. Vercel cannot host these: they need the Docker socket, hours-long WebSocket connections and a persistent disk. `DEPLOYMENT.md` §1 has the topology and §5 the VPS procedure.
+- **No Linux host** for the orchestrator, worker, Docker and workspace containers. Vercel cannot host these: they need the Docker socket, hours-long WebSocket connections and a persistent disk. `DEPLOYMENT.md` §1 has the topology and §5 the procedure. This is the whole of what is left.
+- **No domain.** §5 step 8 needs `orchestrator.<domain>` pointing at the host's IPv4 address before Caddy can obtain a certificate.
+- **The two shared secrets have not been read out of Vercel.** `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` exist on the deployed project but are not on the development machine, and the host must reuse those exact values (`DEPLOYMENT.md` §2). The Vercel CLI is still not installed or authenticated here, so this needs the owner.
+- **Vercel still points at the placeholder orchestrator.** `ORCHESTRATOR_URL`/`ORCHESTRATOR_PUBLIC_URL` are `https://orchestrator.example.com`; §5 step 9 replaces them, and a **redeploy** is required for the change to take effect.
+
+## Session 8 (2026-09-20): pre-deployment preparation
+
+No deployment, no server, no credential touched. Four changes, all local:
+
+1. **The worker's signal handlers were unreachable.** In `apps/worker/src/index.ts` the `while (!stopping)` poll loop sat *above* the `process.on('SIGTERM'|'SIGINT', …)` registrations, and only `shutdown` sets `stopping` — so the handlers were dead code and the loop could never end. `systemctl stop|restart notea-worker` therefore killed the process outright, abandoning in-flight runs and leaving `running` rows for stale-run recovery to fail two minutes later. The registrations now precede the loop, the poll sleep is interruptible so a signal is not held up by a whole interval, `shutdown` is idempotent, and draining happens after the loop. `notea-worker.service` gained `TimeoutStopSec=120` so systemd allows the drain; a run that outlasts it is still killed, with stale-run recovery as the backstop.
+2. **Production sizing for a 4 vCPU / 8 GB host** in `infra/deploy/vps.env.example`: `WORKSPACE_DEFAULT_MEMORY_MB` 4096 → **3072**, `WORKER_MAX_CONCURRENT_RUNS` 3 → **2**. A container's limit is a cap, not a reservation, so two workspaces at 4096 could exhaust an 8 GB host before either hit its own limit.
+3. **`WORKER_POLL_INTERVAL_MS` 2000 → 15000.** Every tick runs `recoverStaleRuns` and `findApprovedTasks` against Postgres, so at 2 s a managed database never scales to zero and bills as always-on. 15 s stays well inside `STALE_RUN_MS` (2 min) and the 15 s run heartbeat, and only delays picking up a new task by that much. Code defaults are unchanged; this is the production template.
+4. **GitHub access for the VPS: a read-only deploy key** (D-041). §5 step 3a generates it on the host; the private half never leaves it and no PAT is created. The clone URL in §5 was also a placeholder that could never have worked — it is now the real repository.
+
+`DEPLOYMENT.md` was rewritten where it had gone stale: it no longer claims the project is undeployed, §3 and §4 are marked done, §2 marks the two shared secrets COPY rather than GENERATE, and §5 gained the deploy key, the sizing note, the `caddy` availability check, port 80, the `DATABASE_URL` warning, and step 9 (point Vercel at the host and redeploy).
 
 ## Host disk: incident (session 2) and resolution (session 3) — Windows-era history
 

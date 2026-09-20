@@ -49,6 +49,8 @@ async function main(): Promise<void> {
   const slots = new RunSlots(config.WORKER_MAX_CONCURRENT_RUNS);
   let stopping = false;
   let lastReapAt = 0;
+  /** Ends the poll sleep early so a signal is not held up by the whole interval. */
+  let wake: (() => void) | null = null;
   const track = (promise: Promise<void>) => {
     inFlight.add(promise);
     void promise.catch(() => undefined).finally(() => inFlight.delete(promise));
@@ -80,25 +82,41 @@ async function main(): Promise<void> {
     }
   };
 
+  // Registered before the loop: `stopping` is what ends it, and only a signal sets
+  // it, so handlers installed after the loop would never be reached.
+  const shutdown = (signal: string) => {
+    if (stopping) return;
+    stopping = true;
+    log.info('shutting down', { signal, inFlight: inFlight.size, runs: slots.size });
+    wake?.();
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
   while (!stopping) {
     try {
       await tick();
     } catch (err) {
       log.error('tick failed', { error: err instanceof Error ? err.message : String(err) });
     }
-    await new Promise((resolve) => setTimeout(resolve, config.WORKER_POLL_INTERVAL_MS));
+    if (stopping) break;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, config.WORKER_POLL_INTERVAL_MS);
+      wake = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+    wake = null;
   }
 
-  const shutdown = async (signal: string) => {
-    stopping = true;
-    log.info('shutting down', { signal, inFlight: inFlight.size, runs: slots.size });
-    await Promise.allSettled([...inFlight]);
-    await slots.drain();
-    await handle.close();
-    process.exit(0);
-  };
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
+  // Let in-flight runs finish before the pool closes, so a restart does not leave
+  // `running` rows for stale-run recovery to fail two minutes later. A run that
+  // outlasts the unit's TimeoutStopSec is still killed; recovery is the backstop.
+  await Promise.allSettled([...inFlight]);
+  await slots.drain();
+  await handle.close();
+  process.exit(0);
 }
 
 main().catch((err: unknown) => {

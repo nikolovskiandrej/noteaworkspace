@@ -7,9 +7,10 @@ dist/
 *.tsbuildinfo
 
 # environment / secrets (never commit real values)
-.env
-.env.local
-.env.*.local
+# Ignore every .env* except the tracked templates, so that pulling production
+# values down (`vercel env pull <name>`) cannot make them committable.
+.env*
+!.env.example
 
 # test / tooling artifacts
 coverage/
