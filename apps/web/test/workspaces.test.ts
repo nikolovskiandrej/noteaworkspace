@@ -28,6 +28,7 @@ class FakeOrchestrator {
   readonly runtimes = new Map<string, WorkspaceRuntimeInfo>();
   readonly calls: string[] = [];
   failCreate = false;
+  unreachable = false;
 
   private info(id: string, status: WorkspaceRuntimeInfo['status']): WorkspaceRuntimeInfo {
     return { workspaceId: id, status, containerId: 'c', image: 'img', volumeName: 'v', resources: null, createdAt: null, startedAt: null, dockerStatus: status };
@@ -44,6 +45,7 @@ class FakeOrchestrator {
     return info;
   }
   async getWorkspace(id: string) {
+    if (this.unreachable) throw new Error('orchestrator unreachable: connect ECONNREFUSED');
     return this.runtimes.get(id) ?? null;
   }
   async startWorkspace(id: string) {
@@ -129,11 +131,27 @@ describeDb('workspace service', () => {
     expect(await getWorkspaceDetail(deps(), workspace.slug, otherId)).toBeNull();
   });
 
-  it('rolls back the row when the runtime cannot be created', async () => {
+  it('rolls back the row, and whatever runtime was made, when creation fails', async () => {
     orchestrator.failCreate = true;
     await expect(createWorkspace(deps(), ownerId, { name: `Broken ${suffix}` })).rejects.toThrow(/image not found/);
     orchestrator.failCreate = false;
     expect(await handle.db.query.workspaces.findFirst({ where: eq(workspaces.slug, `broken-${suffix}`) })).toBeUndefined();
+    // The orchestrator may have created the container before failing (the agent never
+    // became healthy, or the reply was lost); it must not keep running unlisted.
+    const created = orchestrator.calls.filter((c) => c.startsWith('create:')).at(-1)!.slice('create:'.length);
+    expect(orchestrator.calls).toContain(`delete:${created}`);
+  });
+
+  it('tells an unreachable orchestrator apart from a workspace that has no runtime', async () => {
+    const workspace = (await handle.db.query.workspaces.findFirst({ where: eq(workspaces.slug, `proj-${suffix}`) }))!;
+    orchestrator.unreachable = true;
+    try {
+      const detail = await getWorkspaceDetail(deps(), workspace.slug, ownerId);
+      expect(detail).toMatchObject({ runtime: null, runtimeUnavailable: true });
+    } finally {
+      orchestrator.unreachable = false;
+    }
+    expect((await getWorkspaceDetail(deps(), workspace.slug, ownerId))?.runtimeUnavailable).toBe(false);
   });
 
   it('enforces roles on lifecycle and membership operations', async () => {

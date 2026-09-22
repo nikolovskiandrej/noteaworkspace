@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { desc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { ScriptedCommandRunner, type AgentRunEvent, type AgentRunHandle, type AgentRuntime, type WorkspaceSession } from '@notea/agents';
+import { ScriptedCommandRunner, type AgentRunEvent, type AgentRunHandle, type AgentRuntime, type CommandRunner, type WorkspaceSession } from '@notea/agents';
 import {
   agentRunEvents,
   agentRuns,
@@ -18,7 +18,16 @@ import {
   workspaces,
   type DatabaseHandle,
 } from '@notea/db';
-import { RunSlots, claimNextTask, integrateApprovedTask, recoverStaleRuns, runTask, startDueRuns, type ProcessorDeps } from '../src/processor';
+import {
+  RunSlots,
+  claimNextTask,
+  integrateApprovedTask,
+  recoverStaleIntegrations,
+  recoverStaleRuns,
+  runTask,
+  startDueRuns,
+  type ProcessorDeps,
+} from '../src/processor';
 import { acquireIntegrationLease, integrationLeaseHolder } from '../src/integration-lease';
 
 const url = process.env.DATABASE_URL;
@@ -296,6 +305,92 @@ describeDb('task processor', () => {
     expect((await integrationLeaseHolder(handle.db, workspaceId))?.workerId).toBe('other-worker');
 
     await handle.db.update(workspaces).set({ integrationLockedBy: null, integrationLockedUntil: null }).where(eq(workspaces.id, workspaceId));
+  });
+
+  it('stops a started agent when the run fails before the agent has finished', async () => {
+    runner = scriptedGit();
+    let cancels = 0;
+    const runtime: AgentRuntime = {
+      id: 'generic-cli',
+      label: 'unstorable',
+      provider: null,
+      supports: () => true,
+      async start(): Promise<AgentRunHandle> {
+        return {
+          sessionId: 'fake-session',
+          events: (async function* (): AsyncGenerator<AgentRunEvent> {
+            yield { type: 'started', sessionId: 'fake-session', at: new Date().toISOString() };
+            // BigInt has no JSON form, so storing this event throws mid-run.
+            yield { type: 'tool_call', name: 'Bash', input: { size: 1n }, at: new Date().toISOString() };
+            await new Promise(() => undefined); // the agent itself would keep going
+          })(),
+          cancel: async () => {
+            cancels += 1;
+          },
+        };
+      },
+    };
+    const d = deps(runtime);
+    const task = await createTask({ title: `Unstorable ${suffix}` });
+    await runTask(d, (await claimNextTask(d))!);
+    // Otherwise the CLI keeps working, and spending, behind a task that reads `failed`.
+    expect(cancels).toBe(1);
+    expect((await handle.db.query.agentTasks.findFirst({ where: eq(agentTasks.id, task.id) }))?.status).toBe('failed');
+  });
+
+  it('keeps an integrated task done when removing its worktree fails afterwards', async () => {
+    runner = scriptedGit({ dirtyWorktree: false });
+    const task = await createTask({ title: `Removal ${suffix}` });
+    await handle.db
+      .update(agentTasks)
+      .set({ status: 'approved', branch: `notea/task/${task.id}`, worktreePath: `/home/dev/.notea/worktrees/${task.id}` })
+      .where(eq(agentTasks.id, task.id));
+    // The workspace connection drops right after the fast-forward.
+    const dropping: CommandRunner = {
+      run: async (command, options) => {
+        if (command.startsWith('git worktree remove')) throw new Error('connection closed before the process exited (1006)');
+        return runner.run(command, options);
+      },
+    };
+    const d = deps(fakeRuntime([]), { connect: async () => ({ session: fakeSession(), runner: dropping, close: () => undefined }) });
+    await integrateApprovedTask(d, (await handle.db.query.agentTasks.findFirst({ where: eq(agentTasks.id, task.id) }))!);
+    // The base branch has the commits; reporting `failed` would invite running it again.
+    expect((await handle.db.query.agentTasks.findFirst({ where: eq(agentTasks.id, task.id) }))?.status).toBe('done');
+    expect(runner.calls.map((c) => c.command)).toContain(`git merge --ff-only 'notea/task/${task.id}'`);
+  });
+
+  it('hands an integration abandoned by a stopped worker back to approved', async () => {
+    const d = deps(fakeRuntime([]));
+    const task = await createTask({ title: `Abandoned ${suffix}` });
+    const longAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const setTask = (updatedAt: Date) =>
+      handle.db.update(agentTasks).set({ status: 'integrating', updatedAt }).where(eq(agentTasks.id, task.id));
+    const setLease = (by: string | null, until: Date | null) =>
+      handle.db.update(workspaces).set({ integrationLockedBy: by, integrationLockedUntil: until }).where(eq(workspaces.id, workspaceId));
+    const status = async () => (await handle.db.query.agentTasks.findFirst({ where: eq(agentTasks.id, task.id) }))?.status;
+
+    try {
+      // Claimed two hours ago by a worker that died holding a lease that has since expired.
+      await setTask(longAgo);
+      await setLease('dead-worker', new Date(Date.now() - 60_000));
+      expect(await recoverStaleIntegrations(d)).toBeGreaterThanOrEqual(1);
+      expect(await status()).toBe('approved');
+      expect(await recoverStaleIntegrations(d)).toBe(0);
+
+      // A live lease: another worker may still be integrating it.
+      await setTask(longAgo);
+      await setLease('other-worker', new Date(Date.now() + 60_000));
+      expect(await recoverStaleIntegrations(d)).toBe(0);
+      expect(await status()).toBe('integrating');
+
+      // A fresh claim is not abandoned, even with the lease free between a worker's tasks.
+      await setTask(new Date());
+      await setLease(null, null);
+      expect(await recoverStaleIntegrations(d)).toBe(0);
+      expect(await status()).toBe('integrating');
+    } finally {
+      await setLease(null, null);
+    }
   });
 
   it('releases the integration lease once integration finishes', async () => {

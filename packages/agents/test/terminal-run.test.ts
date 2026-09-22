@@ -6,7 +6,7 @@
  * down that the stream always terminates.
  */
 import { describe, expect, it } from 'vitest';
-import { now, startTerminalRun } from '../src/terminal-run';
+import { BACKSTOP_MARGIN_MS, now, startTerminalRun } from '../src/terminal-run';
 import type { AgentRunEvent, WorkspaceSession } from '../src/types';
 
 interface Controls {
@@ -14,6 +14,7 @@ interface Controls {
   emitOutput: (data: string) => void;
   emitExit: (exitCode: number | null) => void;
   killed: string[];
+  created: Array<Parameters<WorkspaceSession['createTerminal']>[0]>;
 }
 
 /** A session that only does what the test tells it to; it never reports an exit on its own. */
@@ -21,12 +22,17 @@ function controllableSession(): Controls {
   let outputListener: ((data: string) => void) | null = null;
   let exitListener: ((exitCode: number | null) => void) | null = null;
   const killed: string[] = [];
+  const created: Controls['created'] = [];
   return {
     killed,
+    created,
     emitOutput: (data) => outputListener?.(data),
     emitExit: (exitCode) => exitListener?.(exitCode),
     session: {
-      createTerminal: async () => ({ sessionId: 'session-1' }),
+      createTerminal: async (input) => {
+        created.push(input);
+        return { sessionId: 'session-1' };
+      },
       killTerminal: async (sessionId) => void killed.push(sessionId),
       onTerminalOutput: (_id, listener) => {
         outputListener = listener;
@@ -115,6 +121,20 @@ describe('startTerminalRun', () => {
     const events = await collected;
     expect(controls.killed).toEqual(['session-1']);
     expect(events.at(-1)).toMatchObject({ type: 'finished', outcome: 'cancelled', exitCode: null });
+  });
+
+  it('gives the transport a hard deadline just past the run’s own', async () => {
+    const controls = controllableSession();
+    const handle = await startTerminalRun(controls.session, { ...options, maxMinutes: 30 });
+    const collected = drain(handle.events);
+
+    // Past the run's own 30 minutes, so the run reports `timeout` itself. Omitting it
+    // left the orchestrator's 10-minute exec default in charge, which killed every
+    // longer agent run and reported it as `failed`.
+    expect(controls.created[0]?.timeoutMs).toBe(30 * 60 * 1000 + BACKSTOP_MARGIN_MS);
+
+    controls.emitExit(0);
+    await collected;
   });
 
   it('keeps the real exit when it arrives inside the grace period after a cancel', async () => {

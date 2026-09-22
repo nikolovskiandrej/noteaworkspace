@@ -90,6 +90,7 @@ let spawned: FakePty[];
 let spawnedProcesses: FakeProcess[];
 let sessions: SessionManager;
 let processes: ProcessManager;
+let fsService: FsService;
 let projectDir: string;
 
 function identity(overrides: Partial<ClientIdentity> = {}): ClientIdentity {
@@ -132,10 +133,11 @@ beforeEach(async () => {
     defaultTimeoutMs: 60_000,
     idGenerator: () => `e${++execCounter}`,
   });
+  fsService = new FsService(projectDir);
   const hub = new AgentHub({
     sessions,
     processes,
-    fs: new FsService(projectDir),
+    fs: fsService,
     workspaceId: 'ws-test',
     projectDir,
     agentVersion: 'test',
@@ -337,6 +339,22 @@ describe('agent server + hub', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(spawnedProcesses[1]?.killSignals).toEqual(['SIGTERM']);
     other.close();
+  });
+
+  it('does not start an exec for a client that left while its cwd was being resolved', async () => {
+    const resolveAnyDir = fsService.resolveAnyDir.bind(fsService);
+    fsService.resolveAnyDir = async (clientPath) => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return resolveAnyDir(clientPath);
+    };
+    const client = await connectIdentified(identity());
+    client.send({ type: 'exec.start', reqId: 'x1', command: 'sleep', args: ['100'], cwd: '.' });
+    client.close();
+    await client.closed;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Its processes were killed on disconnect; nothing may be started for it afterwards.
+    expect(spawnedProcesses).toHaveLength(0);
+    expect(processes.size).toBe(0);
   });
 
   it('broadcasts fs.changed after file writes and passes env to terminals', async () => {

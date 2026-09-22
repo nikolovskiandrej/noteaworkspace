@@ -8,9 +8,9 @@ Actors: owner (trusted), invited collaborators (semi-trusted, shell access insid
 
 ## 2. Boundaries and controls (implemented unless noted)
 
-**Browser ↔ control plane.** Auth.js JWT sessions in HTTP-only cookies; scrypt password hashes; constant-time-ish credential check (dummy hash for unknown emails); every server action and route handler re-checks the session and the workspace membership/role (`apps/web/src/lib/authz.ts`); non-members get "not found". No self sign-up. Pending: sign-in rate limiting (M2).
+**Browser ↔ control plane.** Auth.js JWT sessions in HTTP-only cookies; scrypt password hashes; constant-time-ish credential check (dummy hash for unknown emails); every server action and route handler re-checks the session and the workspace membership/role (`apps/web/src/lib/authz.ts`); non-members get "not found". No self sign-up. Failed sign-ins are rate limited per e-mail and per client address (`apps/web/src/lib/rate-limit.ts`; in memory, so per web process).
 
-**Browser ↔ orchestrator WebSocket.** Short-lived HS256 connect tokens bound to one workspace, role and identity; identity injected by the orchestrator as the first frame; browsers cannot re-identify (tested). Tokens are re-issued on every reconnect through the authenticated web route.
+**Browser ↔ orchestrator WebSocket.** Short-lived HS256 connect tokens bound to one workspace, role and identity; identity injected by the orchestrator as the first frame; browsers cannot re-identify (tested). Tokens are re-issued on every reconnect through the authenticated web route. Frames a client sends while its token is still being verified are held, not dropped, and only ever reach the agent after the orchestrator's `identify`; that buffer is capped at 8 MB, so an unauthenticated peer cannot grow it.
 
 **Control plane / worker ↔ orchestrator REST.** Bearer API key, constant-time comparison; loopback or private network only.
 

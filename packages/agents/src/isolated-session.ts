@@ -29,9 +29,14 @@ export interface IsolatedAgentSessionOptions {
    * owns the repository. Never a place for credentials: those are per-run.
    */
   baseEnv?: Record<string, string>;
+  /** Pause between attempts to stop a process whose stream was lost; tests shorten it. */
+  lostProcessRetryMs?: number;
 }
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
+const LOST_PROCESS_RETRY_MS = 2_000;
+/** Attempts at stopping a process whose stream was lost: about half a minute at the default pause. */
+const LOST_PROCESS_ATTEMPTS = 15;
 /** Linux caps a single argv entry at 128 KiB; stay well below it. */
 const DEFAULT_MAX_FILE_BYTES = 96 * 1024;
 
@@ -111,6 +116,10 @@ export class IsolatedAgentSession implements WorkspaceSession, CommandRunner {
       } catch {
         /* the stream died; the exit below keeps the consumer from hanging */
       } finally {
+        // No exit frame: the stream was lost, not the process, which may still be
+        // running. Stop it rather than leave it editing a worktree the run is about
+        // to commit, unwatched.
+        if (!state.ended) void stopLostProcess(started.kill, this.options.lostProcessRetryMs ?? LOST_PROCESS_RETRY_MS);
         settle(state, state.exit ?? null);
       }
     })();
@@ -202,6 +211,23 @@ interface ExecState {
 function emitOutput(state: ExecState, data: string): void {
   if (state.outputListeners.length === 0) state.pendingOutput.push(data);
   else for (const listener of [...state.outputListeners]) listener(data);
+}
+
+/**
+ * Keeps trying for a while, because the usual reason a stream is lost is an
+ * orchestrator restart (a deploy): the kill fails until it is back, seconds later.
+ * The orchestrator's own deadline for the process died with the old instance, so
+ * nothing else would stop it.
+ */
+async function stopLostProcess(kill: () => Promise<void>, retryMs: number): Promise<void> {
+  for (let attempt = 1; attempt <= LOST_PROCESS_ATTEMPTS; attempt += 1) {
+    try {
+      await kill();
+      return;
+    } catch {
+      if (attempt < LOST_PROCESS_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, retryMs));
+    }
+  }
 }
 
 function settle(state: ExecState, exitCode: number | null): void {

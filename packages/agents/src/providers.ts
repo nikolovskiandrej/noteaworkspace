@@ -10,9 +10,9 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     name: 'Anthropic',
     credentialEnv: 'ANTHROPIC_API_KEY',
     models: [
-      { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', capabilities: { tools: true, contextTokens: 200_000 } },
-      { id: 'claude-opus-5', label: 'Claude Opus 5', capabilities: { tools: true, contextTokens: 200_000 } },
-      { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', capabilities: { tools: true, contextTokens: 200_000 } },
+      { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', capabilities: { tools: true, contextTokens: 1_000_000 } },
+      { id: 'claude-opus-5', label: 'Claude Opus 5', capabilities: { tools: true, contextTokens: 1_000_000 } },
+      { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', capabilities: { tools: true, contextTokens: 1_000_000 } },
       { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', capabilities: { tools: true, contextTokens: 200_000 } },
     ],
   },

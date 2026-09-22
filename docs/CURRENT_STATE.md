@@ -1,10 +1,10 @@
 # Notea Workspace — Current State
 
-Last updated: 2026-09-22, end of session 9 (pre-deployment preparation). Session 8 (2026-09-19) migrated development from Windows 11 to Ubuntu 26.04 and is recorded below. Update this file whenever reality changes.
+Last updated: 2026-09-22, end of session 10 (whole-project bug review; 17 defects fixed, each with a test). Session 9 prepared the deployment; session 8 (2026-09-19) migrated development from Windows 11 to Ubuntu 26.04. Both are recorded below. Update this file whenever reality changes.
 
 ## One-line status
 
-**M0 (runtime), M1 (control plane + browser UI) and the core of M3 (agent tasks in isolated worktrees with human-approved, serialized integration) are implemented, tested, and verified end to end in Docker — including the browser UI, real cancellation, real timeouts, and real runs of all three agent CLIs. M2 collaboration is partially done. Session 5 added the worktree/branch reaper (D-038). Session 6 closed the credential exposure: every agent process now runs as the Unix uid of the member whose task it is (D-039), and a credential carries its authentication mode so a Claude subscription can never silently become metered API usage (D-040). Session 7 verified that independently against a live container, committed the work session 6 had left uncommitted, prepared the repository for GitHub and Vercel, and — finally — **ran the first authenticated agent task end to end**: a real Claude Code process under a Claude subscription token wrote `CHANGELOG.md`, committed it, and the task went review → approval → integration → reaped, with the credential never appearing in a log, an event, a diff or the database. The last long-standing blocker is closed. Session 8 moved the whole development environment from Windows 11 to Ubuntu 26.04 and re-proved it there: the repository, the dev database and both agent identities came across intact, the suite reproduces exactly (167), and the pipeline was driven end to end again under a real Claude subscription — this time over `network` connect mode, which no session had ever exercised. **The project is no longer Windows-bound.****
+**M0 (runtime), M1 (control plane + browser UI) and the core of M3 (agent tasks in isolated worktrees with human-approved, serialized integration) are implemented, tested, and verified end to end in Docker — including the browser UI, real cancellation, real timeouts, and real runs of all three agent CLIs. M2 collaboration is partially done. Session 5 added the worktree/branch reaper (D-038). Session 6 closed the credential exposure: every agent process now runs as the Unix uid of the member whose task it is (D-039), and a credential carries its authentication mode so a Claude subscription can never silently become metered API usage (D-040). Session 7 verified that independently against a live container, committed the work session 6 had left uncommitted, prepared the repository for GitHub and Vercel, and — finally — **ran the first authenticated agent task end to end**: a real Claude Code process under a Claude subscription token wrote `CHANGELOG.md`, committed it, and the task went review → approval → integration → reaped, with the credential never appearing in a log, an event, a diff or the database. The last long-standing blocker is closed. Session 8 moved the whole development environment from Windows 11 to Ubuntu 26.04 and re-proved it there: the repository, the dev database and both agent identities came across intact, the suite reproduces exactly (167), and the pipeline was driven end to end again under a real Claude subscription — this time over `network` connect mode, which no session had ever exercised. **The project is no longer Windows-bound.** Session 10 reviewed every source file and fixed 17 defects, the worst of which ended every isolated agent run within 10 minutes (5 if it went quiet) regardless of `max_minutes` (see Session 10 below).**
 
 ## Repository (actual contents)
 
@@ -21,7 +21,7 @@ notea-workspace/
 │   ├── protocol/       protocol v1.1 (terminals, files, exec, presence) + orchestrator API types  [implemented, tested]
 │   ├── workspace-agent/ in-container daemon (PTY sessions, processes, files, presence)          [implemented, tested]
 │   ├── workspace-client/ protocol client (browser + Node) with reconnect; OrchestratorClient    [implemented, tested]
-│   ├── db/             Drizzle schema + migrations 0000/0001, client, migrate script            [implemented, tested]
+│   ├── db/             Drizzle schema + migrations 0000–0004, client, migrate script            [implemented, tested]
 │   └── agents/         providers, runtimes (Claude Code headless, generic CLIs), git worktrees,
 │                       integration, task transitions, scopes, briefs, credential crypto        [implemented, tested]
 ├── infra/
@@ -107,6 +107,10 @@ Without `DATABASE_URL`, the db/web/worker database suites skip themselves. Witho
 11. **Dev console** (`DEV_CONSOLE=true`) mints tokens without auth; keep it off on reachable hosts.
 12. Old server-side artefacts: none known. Sessions do not survive container restarts (by design).
 13. **The npm cache and Docker storage locations are machine-level settings**, not repository settings (`ARCHITECTURE.md` §12). A fresh clone on another machine keeps that machine's defaults; only `.tmp` for tests travels with the repository.
+14. **Agent-exec pid files are never removed after a normal exit.** `/tmp/.notea-exec-<execId>.pid` is deleted only by the kill script, so one tiny file per finished exec stays in the container's `/tmp` until the container is recreated. Harmless at personal scale.
+15. **No backpressure on WebSocket sends.** The agent and the bridge write to a slow client without waiting, so a client that cannot keep up with a very chatty terminal buffers in memory. Fine for two people; a limit belongs with multi-tenant hardening.
+16. **Recovering an interrupted integration waits for the lease to expire** (up to 30 minutes, D-042), because the worker id changes with every restart. A stable `WORKER_ID` would allow reclaiming immediately.
+17. **The dev Postgres volume was restored by hand** in session 8, so `docker compose … up` warns that `notea-dev-postgres-data` "already exists but was not created by Docker Compose". Cosmetic; the volume is used as is.
 
 ## Deployment status (session 7)
 
@@ -129,6 +133,47 @@ deployment happened and then contradicted the paragraph above it):
 - ~~**No domain.**~~ **Done (2026-09-22).** `orchestrator.noteawork.com` → `178.105.211.58`, verified resolving. DNS is Cloudflare, **DNS-only (not proxied)**, which is what Caddy's ACME and the browser's direct `wss://` both need — do not turn the orange cloud on.
 - **The two shared secrets have not been read out of Vercel.** `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` exist on the deployed project but are not on the development machine, and the host must reuse those exact values (`DEPLOYMENT.md` §2). The Vercel CLI is still not installed or authenticated here, so this needs the owner.
 - **Vercel still points at the placeholder orchestrator.** `ORCHESTRATOR_URL`/`ORCHESTRATOR_PUBLIC_URL` are `https://orchestrator.example.com` and must become `https://orchestrator.noteawork.com`; §5 step 9, and a **redeploy** is required for the change to take effect.
+
+## Session 10 (2026-09-22): whole-project bug review
+
+Every source file was read and checked against the docs. 17 defects were fixed, each with a regression test that fails on the old code and passes on the new (suite 169 → 186); the ones that only show on real infrastructure were reproduced there before being fixed.
+
+**Agent runs.**
+1. **Every isolated agent run was killed after at most 10 minutes**, whatever `max_minutes` said, and reported as `failed`. `startTerminalRun` never passed its deadline to `createTerminal`, so the orchestrator applied its 10-minute exec default: the "backstop" fired first. It now passes `maxMinutes` + 60 s (`BACKSTOP_MARGIN_MS`).
+2. **An agent that printed nothing for 5 minutes lost its run.** Found by the end-to-end probe for (1): Node's fetch aborts a response body that receives nothing for 300 s, so a Claude Code run inside one long tool call (a test suite, a build) was read as "exited, code null", i.e. `failed`, while the agent kept working. The orchestrator now sends a `keepalive` frame every 30 s on streamed agent execs (an additive frame type).
+3. **A lost stream left the agent running unwatched**, editing a worktree the worker was about to commit. `IsolatedAgentSession` now stops a process whose stream ended without an exit frame (retrying for ~30 s, since the usual cause is an orchestrator restart), and the orchestrator kills an agent exec whose streaming caller disconnects (a worker crash, or a restart that outlasts its drain).
+4. **A run that failed while its agent was still going** (an event that cannot be stored, a lost database connection) left the CLI running and spending. `runTask` now cancels it before anything else.
+5. **Gemini runs could not start in a fresh workspace.** The runtime wrote its first-run settings to `/home/dev/.gemini`, which an agent uid cannot create and the CLI, whose HOME is `~/.notea/agents/<uid>`, never reads. Reproduced in a fresh container ("Permission denied"). The run now seeds `$HOME/.gemini/settings.json` from its own command line.
+
+**Worker and integration.**
+6. **A git command in flight when the workspace connection dropped hung the worker forever.** `runExec` waited for an `exec.exit` the agent could no longer deliver (it kills a disconnected client's processes); during integration that also held the per-workspace mutex, blocking every later integration until a restart. `runExec` now rejects with `disconnected`.
+7. **A task whose worker died mid-integration stayed `integrating` forever**: nothing leads out of that status, users cannot cancel it, and the reaper skips any workspace with an active task. It is now handed back to `approved` and retried (D-042).
+8. **An integrated task could end up `failed`**: its worktree was removed before the outcome was recorded, so a failure there (a dropped connection) overwrote a successful fast-forward. The outcome is recorded first; removal is best effort, and the reaper retries it.
+
+**Browser path.**
+9. **The bridge dropped frames sent while it was still verifying the token.** `@fastify/websocket` hands over an already-open socket and the handler awaited before attaching listeners, while the web UI sends its first file-tree request the moment it sees `open`. A client that left in that window also left an upstream connection behind, a ghost in presence. Listeners now go on first; the pre-upstream buffer is capped at 8 MB.
+10. **The editor threw away unsaved edits on every reconnect**: its load effect destroyed the editor on any connection-state change and reloaded the file from disk.
+11. **The editor could show one file's content under another's path** when reads finished out of order while switching files ("Overwrite" would then have written it there). Loads are now sequenced.
+12. **A briefly unreachable orchestrator unmounted the live workspace view**, and the editor with it, on the next page refresh, because "unknown" rendered as "not running". The live view now stays up and shows the reconnect banner.
+13. **A failed workspace creation left its container running** where nothing listed it (the orchestrator can create it and then time out waiting for the agent). The web app now removes the runtime as well as the row.
+
+**Workspace agent and libraries.**
+14. An `exec.start` whose client disconnected while its `cwd` was being resolved started a process nobody owned; it ran until its timeout.
+15. A process over the output limit re-sent the "limit exceeded" notice, and its output, for every chunk until it died.
+16. `term.create` resolved a relative `cwd` against the agent's own working directory instead of the project directory the protocol names.
+17. `PerKeyMutex` never forgot a key: it compared the stored tail with the wrong promise.
+
+Also corrected: `isDirectoryInUse` claimed every process in the container is `dev` (since D-039 agent-uid processes are invisible to it, which the reaper's active-task skip already covers); the model catalog's context sizes (1 M tokens for the 5-family); two Windows-era CRLF working files; stale statements in `HANDOFF.md` §7/§8/§16/§17, this file's migrations line and `AGENT_SYSTEM.md`.
+
+**Verified.** Typecheck clean (9 workspaces); **186 passed / 3 skipped** with `DATABASE_URL`, in repeated runs with no unhandled errors; production `next build` (7 routes); `npm run build:image` and the 3 Docker e2e tests on the new image. Against the real stack (local orchestrator, Docker Engine):
+
+| Check | Result |
+|---|---|
+| 11-minute agent process, before/after (1) and (2) | First probe, before the keepalive: the old and the new path both died at **301.7 s**, which is how (2) was found. After both fixes: the process started the old way was killed at **600.9 s**; the same process through `startTerminalRun` with `max_minutes` 12 ran the full **660 s** and finished `completed`, exit 0. |
+| Gemini seeding (5), uid 20003 through the orchestrator, fresh container | Settings written to `/home/dev/.notea/agents/20003/.gemini/settings.json`, owned by 20003; the old path failed with `mkdir: cannot create directory '/home/dev/.gemini': Permission denied`. |
+| **First browser pass on Linux** | Headless Chrome, driven over the DevTools protocol, against the production build and a throwaway database: sign-in, create a workspace, first file-tree load, unsaved edits surviving a dropped connection, Save written into the container, a terminal running commands as `dev`, presence, delete (container removed), no console errors — **9/9**. The same scenario on a build with the old editor **lost the edits** after the reconnect. |
+
+**Environment.** Session 9 had been run in the read-only backup clone (`~/Documents/Linux_Backup/Projects/D_ClaudeProjects/notea-workspace`). Its commits were on GitHub, and the working copy `~/ClaudeProjects/notea-workspace` was fast-forwarded to them (`234a46d → a4a42c3`) before any work; `HANDOFF.md` §28 now says where to work. The demo workspace's container still runs the image from before the rebuild: stop and start it to get the fixed agent daemon.
 
 ## Session 9 (2026-09-20 – 2026-09-22): pre-deployment preparation
 

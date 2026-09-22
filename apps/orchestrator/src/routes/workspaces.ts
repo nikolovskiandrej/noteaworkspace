@@ -9,6 +9,8 @@ import { RuntimeError } from '../errors';
 import type { TokenService } from '../tokens';
 
 const AGENT_READY_TIMEOUT_MS = 60_000;
+/** Well inside the 300 s after which Node's fetch gives up on a silent response body. */
+const EXEC_KEEPALIVE_MS = 30_000;
 
 const CreateWorkspaceSchema = z.object({
   workspaceId: z.string().min(1).max(64),
@@ -52,6 +54,8 @@ export interface WorkspaceRoutesDeps {
   tokens: TokenService;
   apiKey: string;
   agentExec: AgentExecRunner;
+  /** Interval of keepalive frames on streamed agent execs; tests shorten it. */
+  execKeepaliveMs?: number;
 }
 
 /**
@@ -122,12 +126,25 @@ export async function registerWorkspaceRoutes(app: FastifyInstance, deps: Worksp
       if (!frames.writableEnded) frames.write(`${JSON.stringify(frame)}\n`);
     };
     write({ type: 'started', execId: handle.execId });
+    // A quiet process must not look like a finished one to the client.
+    const keepalive = setInterval(() => write({ type: 'keepalive' }), deps.execKeepaliveMs ?? EXEC_KEEPALIVE_MS);
+    let exited = false;
     handle.stdout.on('data', (chunk: Buffer) => write({ type: 'out', data: chunk.toString('utf8') }));
     handle.stderr.on('data', (chunk: Buffer) => write({ type: 'err', data: chunk.toString('utf8') }));
     void handle.done
       .then((outcome) => write({ type: 'exit', exitCode: outcome.exitCode, timedOut: outcome.timedOut }))
       .catch(() => write({ type: 'exit', exitCode: null, timedOut: false }))
-      .finally(() => frames.end());
+      .finally(() => {
+        exited = true;
+        clearInterval(keepalive);
+        frames.end();
+      });
+    // The stream is the process's only watcher. If the caller goes away first (the
+    // worker crashed, or a restart outlasted its drain), stop the process, as the
+    // workspace agent does with a disconnected client's execs.
+    reply.raw.on('close', () => {
+      if (!exited) void deps.agentExec.kill(containerId, handle.execId, body.uid).catch(() => undefined);
+    });
     reply.header('content-type', 'application/x-ndjson');
     reply.header('cache-control', 'no-store');
     return reply.send(frames);

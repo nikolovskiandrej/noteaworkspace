@@ -88,6 +88,19 @@ describe('ProcessManager', () => {
     expect(exit).toHaveBeenCalledWith('e1', 'c1', null, 'SIGTERM', false);
   });
 
+  it('reports the output limit once and forwards nothing written after it', () => {
+    const { manager, spawned } = makeManager({}, { exitOnKill: false });
+    const output = vi.fn();
+    manager.on('output', output);
+    manager.start({ ownerId: 'c1', command: 'yes' });
+    spawned[0]?.emitStdout('x'.repeat(65));
+    // The process has been signalled but is still writing while it dies.
+    spawned[0]?.emitStdout('y'.repeat(10));
+    spawned[0]?.emitStdout('z'.repeat(10));
+    expect(output.mock.calls.map((c) => c[3])).toEqual(['x'.repeat(65), '\n[notea] output limit exceeded; process killed\n']);
+    expect(spawned[0]?.killSignals).toEqual(['SIGTERM']);
+  });
+
   it('times out, escalates to SIGKILL and reports timedOut', () => {
     vi.useFakeTimers();
     try {

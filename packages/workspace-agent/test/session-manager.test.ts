@@ -41,6 +41,15 @@ describe('SessionManager', () => {
     expect(spawned[0]?.options.env.PATH).toBe('/usr/bin');
   });
 
+  it('resolves a relative working directory against the project directory', () => {
+    const { manager, spawned } = makeManager();
+    const relative = manager.create({ cols: 80, rows: 24, cwd: 'src/app', createdBy: creator });
+    const absolute = manager.create({ cols: 80, rows: 24, cwd: '/home/dev/.notea/worktrees/t1', createdBy: creator });
+    expect(relative.cwd).toBe('/home/dev/project/src/app');
+    expect(spawned[0]?.options.cwd).toBe('/home/dev/project/src/app');
+    expect(absolute.cwd).toBe('/home/dev/.notea/worktrees/t1');
+  });
+
   it('uses no default args when a custom command is given', () => {
     const { manager } = makeManager();
     const info = manager.create({ cols: 80, rows: 24, command: 'htop', createdBy: null });

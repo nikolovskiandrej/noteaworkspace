@@ -4,7 +4,16 @@ import { createRuntimeRegistry, parseCredentialsKey } from '@notea/agents';
 import { createDatabase } from '@notea/db';
 import { OrchestratorClient } from '@notea/workspace-client';
 import { loadConfig } from './config';
-import { RunSlots, findApprovedTasks, integrateApprovedTask, recoverStaleRuns, runTask, startDueRuns, type ProcessorDeps } from './processor';
+import {
+  RunSlots,
+  findApprovedTasks,
+  integrateApprovedTask,
+  recoverStaleIntegrations,
+  recoverStaleRuns,
+  runTask,
+  startDueRuns,
+  type ProcessorDeps,
+} from './processor';
 import { reapAll } from './reaper';
 import { createIsolatedSessionFactory, createWorkspaceConnector } from './workspace-connection';
 
@@ -63,6 +72,7 @@ async function main(): Promise<void> {
 
   const tick = async () => {
     await recoverStaleRuns(deps);
+    await recoverStaleIntegrations(deps);
     for (const task of await findApprovedTasks(handle.db)) track(integrateApprovedTask(deps, task));
     await startDueRuns(deps, slots, (task) => {
       const promise = runTask(deps, task);

@@ -266,6 +266,7 @@ export class WorkspaceClient {
     let execId: string | null = null;
     const buffered: Array<AgentMessageOf<'exec.output'> | AgentMessageOf<'exec.exit'>> = [];
     let settle: ((result: ExecResult) => void) | null = null;
+    let fail: ((error: Error) => void) | null = null;
 
     const handle = (message: AgentMessageOf<'exec.output'> | AgentMessageOf<'exec.exit'>) => {
       if (message.type === 'exec.output') {
@@ -285,9 +286,18 @@ export class WorkspaceClient {
       if (execId === null) buffered.push(message);
       else if (message.execId === execId) handle(message);
     });
+    // The agent kills a connection's processes when it drops, and the exit it reports
+    // for them has nowhere to go; without this the caller would wait forever. Before
+    // `exec.started` arrives the request itself is rejected instead.
+    const offState = this.onStateChange(({ state, code }) => {
+      if (state !== 'open' && execId !== null) {
+        fail?.(new WorkspaceRequestError('disconnected', `connection closed before the process exited (${code ?? 'no close code'})`));
+      }
+    });
     try {
-      const done = new Promise<ExecResult>((resolve) => {
+      const done = new Promise<ExecResult>((resolve, reject) => {
         settle = resolve;
+        fail = reject;
       });
       const started = await this.startExec(startInput);
       execId = started.execId;
@@ -298,6 +308,7 @@ export class WorkspaceClient {
     } finally {
       offOutput();
       offExit();
+      offState();
     }
   }
 

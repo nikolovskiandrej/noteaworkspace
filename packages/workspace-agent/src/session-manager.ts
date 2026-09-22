@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type { TerminalCreator, TerminalSessionInfo } from '@notea/protocol';
 import { AgentError, errorMessage } from './errors';
 import type { PtyFactory, PtyProcess } from './pty';
@@ -79,7 +80,9 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     const id = (this.opts.idGenerator ?? randomUUID)();
     const command = input.command ?? this.opts.defaultCommand;
     const args = input.args ?? (input.command ? [] : this.opts.defaultArgs);
-    const cwd = input.cwd ?? this.opts.defaultCwd;
+    // The protocol takes a relative cwd as relative to the project directory, not to
+    // wherever this process happens to run.
+    const cwd = input.cwd ? path.resolve(this.opts.defaultCwd, input.cwd) : this.opts.defaultCwd;
 
     let pty: PtyProcess;
     try {

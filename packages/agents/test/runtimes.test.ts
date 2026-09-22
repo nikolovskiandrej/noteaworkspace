@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -257,10 +258,30 @@ describe('CodexRuntime', () => {
 describe('GeminiRuntime', () => {
   it('builds a headless command line', () => {
     const runtime = new GeminiRuntime();
-    expect(runtime.buildCommandLine({ ...ctx, model: { provider: 'google', modelId: 'gemini-2.5-pro' } }, '/b.md')).toBe(
-      `cd '/home/dev/.notea/worktrees/t1' && gemini --approval-mode yolo -m 'gemini-2.5-pro' -p "$(cat '/b.md')" < /dev/null`,
-    );
+    const line = runtime.buildCommandLine({ ...ctx, model: { provider: 'google', modelId: 'gemini-2.5-pro' } }, '/b.md');
+    expect(line).toMatch(/^if \[ ! -e "\$HOME\/\.gemini\/settings\.json" \]; then /);
+    expect(line.endsWith(` && cd '/home/dev/.notea/worktrees/t1' && gemini --approval-mode yolo -m 'gemini-2.5-pro' -p "$(cat '/b.md')" < /dev/null`)).toBe(true);
     expect(runtime.supports({ provider: 'openai', modelId: 'x' })).toBe(false);
+  });
+
+  it('seeds its settings in the HOME the CLI reads, which under isolation is the member’s own', async () => {
+    // Formerly written to /home/dev/.gemini before the run: a path the agent uid
+    // cannot create (`/home/dev` belongs to `dev`) and the CLI, whose HOME is
+    // ~/.notea/agents/<uid>, never reads.
+    const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'notea-gemini-home-'));
+    const line = new GeminiRuntime({ binary: 'true' }).buildCommandLine({ ...ctx, model: null, worktreePath: home }, '/dev/null');
+    const run = () => execFileSync('/bin/bash', ['-c', line], { env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: home } });
+    try {
+      run();
+      const settingsPath = path.join(home, '.gemini', 'settings.json');
+      expect(JSON.parse(await fsp.readFile(settingsPath, 'utf8'))).toEqual({ security: { folderTrust: { enabled: false } } });
+      // Only ever a first-run default: a member's own settings survive later runs.
+      await fsp.writeFile(settingsPath, '{"mine":true}\n');
+      run();
+      expect(await fsp.readFile(settingsPath, 'utf8')).toBe('{"mine":true}\n');
+    } finally {
+      await fsp.rm(home, { recursive: true, force: true });
+    }
   });
 });
 

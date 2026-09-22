@@ -60,6 +60,8 @@ export interface WorkspaceDetail {
   workspace: Workspace;
   role: WorkspaceRole;
   runtime: WorkspaceRuntimeInfo | null;
+  /** The orchestrator could not be asked (unreachable, erroring): `runtime` is unknown, not absent. */
+  runtimeUnavailable: boolean;
   members: Array<{ userId: string; email: string; name: string; role: WorkspaceRole }>;
   events: WorkspaceEvent[];
 }
@@ -78,8 +80,12 @@ export async function getWorkspaceDetail(
   });
   if (!membership) return null;
 
+  let runtimeUnavailable = false;
   const [runtime, memberRows, events] = await Promise.all([
-    deps.orchestrator.getWorkspace(workspace.id).catch(() => null),
+    deps.orchestrator.getWorkspace(workspace.id).catch(() => {
+      runtimeUnavailable = true;
+      return null;
+    }),
     deps.db
       .select({ userId: users.id, email: users.email, name: users.name, role: workspaceMembers.role })
       .from(workspaceMembers)
@@ -91,7 +97,7 @@ export async function getWorkspaceDetail(
       limit: 50,
     }),
   ]);
-  return { workspace, role: membership.role, runtime, members: memberRows, events };
+  return { workspace, role: membership.role, runtime, runtimeUnavailable, members: memberRows, events };
 }
 
 export async function recordEvent(
@@ -141,7 +147,11 @@ export async function createWorkspace(
     await deps.db.update(workspaces).set({ lastKnownStatus: runtime.status, updatedAt: new Date() }).where(eq(workspaces.id, workspace.id));
     await recordEvent(deps.db, { workspaceId: workspace.id, actorKind: 'system', type: 'workspace.started', payload: { containerId: runtime.containerId } });
   } catch (err) {
-    // No runtime: remove the row so the user can retry with the same slug.
+    // No usable runtime: remove the row so the user can retry with the same slug, and
+    // whatever the orchestrator did create. It may have made the container and then
+    // timed out waiting for the agent, or answered after this client gave up; left
+    // alone, that container keeps running (restart policy) where nothing lists it.
+    await deps.orchestrator.deleteWorkspace(workspace.id, { deleteVolume: true }).catch(() => undefined);
     await deps.db.delete(workspaces).where(eq(workspaces.id, workspace.id));
     throw err;
   }

@@ -180,6 +180,26 @@ describe('WorkspaceClient', () => {
     client.close();
   });
 
+  it('rejects a running exec when the connection drops instead of waiting forever', async () => {
+    const client = new WorkspaceClient({
+      url: `ws://127.0.0.1:${port}/ws?token=${TOKEN}`,
+      WebSocketImpl: identifyingWebSocket(identity),
+      minBackoffMs: 20,
+      maxBackoffMs: 50,
+    });
+    await client.waitForHello();
+    const rejected = expect(client.runExec({ command: 'npm test', shell: true })).rejects.toMatchObject({ code: 'disconnected' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(spawnedProcesses).toHaveLength(1);
+
+    // The agent goes away mid-command: its processes die with the connection, and the
+    // exit it would have reported has nowhere to go.
+    await server.close();
+    sessions.dispose();
+    await rejected;
+    client.close();
+  });
+
   it('reconnects with backoff when the connection drops and re-announces hello', async () => {
     const client = new WorkspaceClient({
       url: `ws://127.0.0.1:${port}/ws?token=${TOKEN}`,

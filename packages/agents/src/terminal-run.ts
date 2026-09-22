@@ -8,6 +8,13 @@ import type { AgentRunEvent, AgentRunHandle, WorkspaceSession } from './types';
  */
 export const EXIT_GRACE_MS = 10_000;
 
+/**
+ * How far past the run's own deadline the transport's hard limit sits. The run's
+ * timer has to fire first so the outcome is a proper `timeout`; the margin covers the
+ * kill and the exit grace. The hard limit only catches a process the run lost.
+ */
+export const BACKSTOP_MARGIN_MS = 60_000;
+
 export interface TerminalRunOptions {
   command: string;
   args: string[];
@@ -46,6 +53,9 @@ export async function startTerminalRun(session: WorkspaceSession, options: Termi
     title: options.title,
     env: options.env,
     attach: true,
+    // Always set: a transport given no deadline falls back to its own default, and the
+    // orchestrator's is 10 minutes, which would kill every longer run as `failed`.
+    timeoutMs: options.maxMinutes * 60 * 1000 + BACKSTOP_MARGIN_MS,
   });
 
   const queue: AgentRunEvent[] = [];

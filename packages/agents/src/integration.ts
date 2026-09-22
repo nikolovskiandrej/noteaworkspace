@@ -63,19 +63,26 @@ export async function integrateTask(git: GitWorktrees, runner: CommandRunner, in
 export class PerKeyMutex {
   private readonly tails = new Map<string, Promise<void>>();
 
+  /** Keys with work running or queued. */
+  get size(): number {
+    return this.tails.size;
+  }
+
   async run<T>(key: string, work: () => Promise<T>): Promise<T> {
     const previous = this.tails.get(key) ?? Promise.resolve();
     let release: () => void = () => undefined;
     const current = new Promise<void>((resolve) => {
       release = resolve;
     });
-    this.tails.set(key, previous.then(() => current));
+    const tail = previous.then(() => current);
+    this.tails.set(key, tail);
     await previous;
     try {
       return await work();
     } finally {
       release();
-      if (this.tails.get(key) === current) this.tails.delete(key);
+      // Nothing queued behind this run: forget the key.
+      if (this.tails.get(key) === tail) this.tails.delete(key);
     }
   }
 }

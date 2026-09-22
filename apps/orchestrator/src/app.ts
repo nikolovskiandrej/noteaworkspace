@@ -15,6 +15,8 @@ export interface AppDeps {
   apiKey: string;
   /** Runs agent processes under a per-user uid; see docker/agent-exec.ts. */
   agentExec: AgentExecRunner;
+  /** Keepalive interval on streamed agent execs (default 30 s); tests shorten it. */
+  execKeepaliveMs?: number;
   logger?: FastifyServerOptions['logger'];
   /** Serve the browser dev console at /dev/console (development only). */
   devConsole?: boolean;
@@ -82,7 +84,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     resolveAgent: (workspaceId) => deps.runtime.agentEndpoint(workspaceId),
   });
   await app.register(async (scoped) => {
-    await registerWorkspaceRoutes(scoped, { runtime: deps.runtime, tokens: deps.tokens, apiKey: deps.apiKey, agentExec: deps.agentExec });
+    await registerWorkspaceRoutes(scoped, {
+      runtime: deps.runtime,
+      tokens: deps.tokens,
+      apiKey: deps.apiKey,
+      agentExec: deps.agentExec,
+      execKeepaliveMs: deps.execKeepaliveMs,
+    });
   });
   if (deps.devConsole) {
     registerDevConsole(app, { runtime: deps.runtime, tokens: deps.tokens });

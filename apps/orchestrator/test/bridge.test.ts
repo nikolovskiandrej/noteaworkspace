@@ -24,6 +24,9 @@ const WORKSPACE_ID = 'ws-bridge';
 
 let agentServer: AgentServer;
 let agentPort: number;
+let hub: AgentHub;
+/** Delays the agent lookup, as a real `docker inspect` does, to widen the setup window. */
+let resolveDelayMs = 0;
 let spawned: FakePty[];
 let app: FastifyInstance;
 let baseUrl: string;
@@ -108,7 +111,7 @@ beforeAll(async () => {
     maxOutputBytes: 1024 * 1024,
     defaultTimeoutMs: 60_000,
   });
-  const hub = new AgentHub({
+  hub = new AgentHub({
     sessions,
     processes,
     fs: new FsService(projectDir),
@@ -141,7 +144,10 @@ beforeAll(async () => {
       throw new RuntimeError(500, 'internal', 'not used');
     },
     remove: async () => undefined,
-    agentEndpoint: async (id) => (id === WORKSPACE_ID ? { host: '127.0.0.1', port: agentPort } : null),
+    agentEndpoint: async (id) => {
+      if (resolveDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, resolveDelayMs));
+      return id === WORKSPACE_ID ? { host: '127.0.0.1', port: agentPort } : null;
+    },
     waitForAgent: async () => ({ host: '127.0.0.1', port: agentPort }),
   };
   app = await buildApp({ runtime, tokens, apiKey: API_KEY, agentExec: noAgentExec });
@@ -239,6 +245,40 @@ describe('workspace bridge', () => {
 
     client.ws.close(1000, 'done');
     expect(await client.closed).toBe(1000);
+  });
+
+  it('delivers frames a client sends while the connection is still being set up', async () => {
+    // The web UI sends its first request as soon as the socket reports `open`, which
+    // happens before the token check and the agent lookup have finished.
+    resolveDelayMs = 100;
+    try {
+      const { token } = await issueToken();
+      const client = await TestClient.open(`ws://${baseUrl}/ws/workspaces/${WORKSPACE_ID}?token=${token}`);
+      client.send({ type: 'ping', reqId: 'early' });
+      await client.nextOfType('hello');
+      expect((await client.nextOfType('pong')).reqId).toBe('early');
+      client.ws.close();
+      await client.closed;
+    } finally {
+      resolveDelayMs = 0;
+    }
+  });
+
+  it('opens no upstream for a client that leaves during setup', async () => {
+    await new Promise((resolve) => setTimeout(resolve, 100)); // earlier tests' connections settle
+    const before = hub.clientCount;
+    resolveDelayMs = 100;
+    try {
+      const { token } = await issueToken();
+      const client = await TestClient.open(`ws://${baseUrl}/ws/workspaces/${WORKSPACE_ID}?token=${token}`);
+      client.ws.close();
+      await client.closed;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Otherwise the agent keeps a connection nobody will ever close: a ghost in presence.
+      expect(hub.clientCount).toBe(before);
+    } finally {
+      resolveDelayMs = 0;
+    }
   });
 
   it('enforces the viewer role through the bridge', async () => {

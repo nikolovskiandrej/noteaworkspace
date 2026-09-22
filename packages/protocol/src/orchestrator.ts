@@ -120,7 +120,13 @@ export type AgentExecFrame =
   | { type: 'started'; execId: string }
   | { type: 'out'; data: string }
   | { type: 'err'; data: string }
-  | { type: 'exit'; exitCode: number | null; timedOut: boolean };
+  | { type: 'exit'; exitCode: number | null; timedOut: boolean }
+  /**
+   * Sent periodically while the process runs. An agent can be silent for minutes (a
+   * long test run inside one tool call), and Node's fetch aborts a response body
+   * that receives nothing for 300 s, which reads as the process having ended.
+   */
+  | { type: 'keepalive' };
 
 export interface OrchestratorErrorBody {
   error: {

@@ -203,9 +203,12 @@ export class GitWorktrees {
   }
 
   /**
-   * True when any process in the container has its working directory inside `dir`
-   * (a shell someone opened there, or an agent that is still running). Everything
-   * in the container runs as one uid, so every `/proc/<pid>/cwd` is readable.
+   * True when a process this runner may inspect has its working directory inside
+   * `dir` — in practice a shell someone opened there, since human terminals and the
+   * runner's own commands run as `dev`. Agent processes run under their members'
+   * own uids (D-039), and the kernel refuses other uids their `/proc/<pid>/cwd`, the
+   * same protection that hides their credentials, so a live agent run is invisible
+   * here: callers must also skip workspaces with active tasks, as the reaper does.
    */
   async isDirectoryInUse(dir: string): Promise<boolean> {
     const script = `for p in /proc/[0-9]*; do readlink "$p/cwd" 2>/dev/null; done | awk -v p=${shellQuote(dir)} '$0 == p || index($0, p "/") == 1 { n++ } END { print n + 0 }'`;

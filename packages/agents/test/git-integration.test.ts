@@ -162,4 +162,15 @@ describe('PerKeyMutex', () => {
     expect(order.indexOf('a1:end')).toBeLessThan(order.indexOf('a2:start'));
     expect(order.indexOf('b1:start')).toBeLessThan(order.indexOf('a1:end'));
   });
+
+  it('forgets a key once nothing is running or queued for it', async () => {
+    const mutex = new PerKeyMutex();
+    const job = (key: string) => mutex.run(key, () => new Promise((resolve) => setTimeout(resolve, 5)));
+    await Promise.all([job('a'), job('a'), job('b')]);
+    // One entry per workspace would otherwise stay for the life of the worker.
+    expect(mutex.size).toBe(0);
+    // The released key still serialises new work.
+    await Promise.all([job('a'), job('a')]);
+    expect(mutex.size).toBe(0);
+  });
 });

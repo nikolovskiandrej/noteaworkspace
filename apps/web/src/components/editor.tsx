@@ -58,35 +58,54 @@ export function Editor({ path, canWrite }: { path: string | null; canWrite: bool
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<EditorHandle | null>(null);
   const etagRef = useRef<string | null>(null);
+  /** Bumped by every load and on teardown; only the latest load may touch the editor. */
+  const loadSeqRef = useRef(0);
   const [status, setStatus] = useState<'idle' | 'loading' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!path || !containerRef.current || !client) return;
+    // Reads can finish out of order: a slow read of the file opened before must not
+    // land last and put its content under this path, where Save would write it.
+    const seq = ++loadSeqRef.current;
     setStatus('loading');
     setMessage(null);
     handleRef.current?.destroy();
     handleRef.current = null;
     try {
       const file = await client.readFile(path);
+      if (seq !== loadSeqRef.current || !containerRef.current) return;
       etagRef.current = file.etag;
-      if (!containerRef.current) return;
       containerRef.current.innerHTML = '';
-      handleRef.current = await createEditor(containerRef.current, path, file.content, () => setStatus('dirty'), !canWrite);
+      const handle = await createEditor(containerRef.current, path, file.content, () => setStatus('dirty'), !canWrite);
+      if (seq !== loadSeqRef.current) {
+        handle.destroy();
+        return;
+      }
+      handleRef.current = handle;
       setStatus('idle');
     } catch (err) {
+      if (seq !== loadSeqRef.current) return;
       setStatus('error');
       setMessage(err instanceof Error ? err.message : 'failed to load file');
     }
   }, [client, path, canWrite]);
 
+  // Load once the socket is open, and again only when the file changes. A reconnect
+  // keeps the editor as it is: reloading would replace unsaved edits with the copy on
+  // disk, and the etag still catches a conflicting change when saving.
   useEffect(() => {
-    if (state === 'open') void load();
-    return () => {
+    if (state === 'open' && !handleRef.current) void load();
+  }, [load, state]);
+
+  useEffect(
+    () => () => {
+      loadSeqRef.current += 1;
       handleRef.current?.destroy();
       handleRef.current = null;
-    };
-  }, [load, state]);
+    },
+    [load],
+  );
 
   // Somebody else (a collaborator or an agent) saved this file through the file API.
   useEffect(() => {

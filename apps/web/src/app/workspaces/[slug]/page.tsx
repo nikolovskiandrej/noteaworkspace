@@ -31,8 +31,12 @@ export default async function WorkspacePage({
   const detail = await getWorkspaceDetail({ db, orchestrator: getOrchestrator() }, slug, session.user.id);
   if (!detail) notFound();
 
-  const { workspace, role, runtime, members, events } = detail;
+  const { workspace, role, runtime, runtimeUnavailable, members, events } = detail;
   const status = runtime?.status ?? 'unknown';
+  // An orchestrator that cannot be asked right now (a redeploy, a network blip) is not
+  // a stopped workspace. Swapping in the "not running" view would unmount the editor
+  // and lose its unsaved edits; the live view shows the outage and reconnects itself.
+  const showLive = status === 'running' || runtimeUnavailable;
   const returnTo = `/workspaces/${workspace.slug}`;
   const rawKey = env().CREDENTIALS_KEY;
   const [taskViews, credentials] = await Promise.all([
@@ -110,7 +114,7 @@ export default async function WorkspacePage({
         workspaceId={workspace.id}
         slug={workspace.slug}
         role={role}
-        running={status === 'running'}
+        running={showLive}
         members={members}
         events={events.map((e) => ({ id: e.id, type: e.type, actorKind: e.actorKind, createdAt: e.createdAt.toISOString(), payload: e.payload as Record<string, unknown> }))}
         currentUserId={session.user.id}

@@ -56,6 +56,8 @@ interface ManagedProcess {
   handle: ProcessHandle;
   bytes: number;
   exited: boolean;
+  /** Output passed maxOutputBytes: reported once, and nothing after it is forwarded. */
+  overLimit: boolean;
   timedOut: boolean;
   timeoutTimer: NodeJS.Timeout;
   killTimer: NodeJS.Timeout | null;
@@ -100,6 +102,7 @@ export class ProcessManager extends EventEmitter<ProcessEvents> {
       handle,
       bytes: 0,
       exited: false,
+      overLimit: false,
       timedOut: false,
       timeoutTimer: setTimeout(() => {
         managed.timedOut = true;
@@ -113,11 +116,13 @@ export class ProcessManager extends EventEmitter<ProcessEvents> {
     const stdoutDecoder = new StringDecoder('utf8');
     const stderrDecoder = new StringDecoder('utf8');
     const onChunk = (stream: 'stdout' | 'stderr', decoder: StringDecoder) => (chunk: Buffer) => {
-      if (managed.exited) return;
+      if (managed.exited || managed.overLimit) return;
       managed.bytes += chunk.byteLength;
       const text = decoder.write(chunk);
       if (text) this.emit('output', id, managed.ownerId, stream, text);
       if (managed.bytes > this.opts.maxOutputBytes) {
+        // A killed process keeps writing until it dies; say so once and drop the rest.
+        managed.overLimit = true;
         this.emit('output', id, managed.ownerId, 'stderr', '\n[notea] output limit exceeded; process killed\n');
         this.kill(id);
       }
@@ -132,9 +137,9 @@ export class ProcessManager extends EventEmitter<ProcessEvents> {
     });
     handle.onExit((code, signal) => {
       const tail = stdoutDecoder.end();
-      if (tail) this.emit('output', id, managed.ownerId, 'stdout', tail);
+      if (tail && !managed.overLimit) this.emit('output', id, managed.ownerId, 'stdout', tail);
       const errTail = stderrDecoder.end();
-      if (errTail) this.emit('output', id, managed.ownerId, 'stderr', errTail);
+      if (errTail && !managed.overLimit) this.emit('output', id, managed.ownerId, 'stderr', errTail);
       this.finish(managed, code, signal);
     });
 

@@ -23,6 +23,37 @@ export function registerBridge(app: FastifyInstance, deps: BridgeDeps): void {
       const workspaceId = request.params.id;
       const log = request.log.child({ workspaceId });
 
+      // Listeners go on before the first await. The socket arrives already open, so a
+      // client may send (the web UI loads its file tree as soon as it sees `open`)
+      // while the token is still being verified; `ws` drops frames nobody listens
+      // for, and a close in that window would otherwise go unnoticed and leave an
+      // upstream connection behind, i.e. a ghost in the workspace's presence list.
+      let upstream: WebSocket | null = null;
+      let upstreamReady = false;
+      let clientGone = false;
+      const pending: Array<{ data: RawData; binary: boolean }> = [];
+      let pendingBytes = 0;
+      client.on('message', (data, isBinary) => {
+        if (upstream && upstreamReady) {
+          upstream.send(data, { binary: isBinary });
+          return;
+        }
+        pendingBytes += rawDataLength(data);
+        if (pendingBytes > MAX_PENDING_BYTES) {
+          closeQuietly(client, 1009, 'too much data before the workspace connection was ready');
+          return;
+        }
+        pending.push({ data, binary: isBinary });
+      });
+      client.on('close', () => {
+        clientGone = true;
+        if (upstream) closeQuietly(upstream, 1000, 'client left');
+      });
+      client.on('error', (err) => {
+        log.warn({ err }, 'client socket error');
+        if (upstream) closeQuietly(upstream, 1011, 'client error');
+      });
+
       let claims;
       try {
         claims = await deps.tokens.verifyConnectToken(request.query.token ?? '', workspaceId);
@@ -42,6 +73,7 @@ export function registerBridge(app: FastifyInstance, deps: BridgeDeps): void {
         client.close(WS_CLOSE.UPSTREAM_UNAVAILABLE, 'workspace is not running');
         return;
       }
+      if (clientGone || client.readyState !== WebSocket.OPEN) return;
 
       const identity: ClientIdentity = {
         id: randomUUID(),
@@ -54,40 +86,41 @@ export function registerBridge(app: FastifyInstance, deps: BridgeDeps): void {
       const upstreamUrl = `ws://${endpoint.host}:${endpoint.port}${AGENT_WS_PATH}?token=${encodeURIComponent(
         deps.tokens.agentToken(workspaceId),
       )}`;
-      const upstream = new WebSocket(upstreamUrl, { handshakeTimeout: 10_000 });
-      const pending: Array<{ data: RawData; binary: boolean }> = [];
-      let upstreamReady = false;
+      const agent = new WebSocket(upstreamUrl, { handshakeTimeout: 10_000 });
+      upstream = agent;
 
       log.info({ userId: identity.userId, role: identity.role, connectionId: identity.id }, 'bridging workspace connection');
 
-      client.on('message', (data, isBinary) => {
-        if (upstreamReady) upstream.send(data, { binary: isBinary });
-        else pending.push({ data, binary: isBinary });
-      });
-      client.on('close', () => closeQuietly(upstream, 1000, 'client left'));
-      client.on('error', (err) => {
-        log.warn({ err }, 'client socket error');
-        closeQuietly(upstream, 1011, 'client error');
-      });
-
-      upstream.on('open', () => {
+      agent.on('open', () => {
         upstreamReady = true;
-        upstream.send(JSON.stringify(identify));
-        for (const frame of pending) upstream.send(frame.data, { binary: frame.binary });
+        agent.send(JSON.stringify(identify));
+        for (const frame of pending) agent.send(frame.data, { binary: frame.binary });
         pending.length = 0;
       });
-      upstream.on('message', (data, isBinary) => {
+      agent.on('message', (data, isBinary) => {
         if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary });
       });
-      upstream.on('close', (code, reason) => {
+      agent.on('close', (code, reason) => {
         closeQuietly(client, translateCloseCode(code), reason.toString());
       });
-      upstream.on('error', (err) => {
+      agent.on('error', (err) => {
         log.warn({ err: err.message }, 'workspace agent connection error');
         closeQuietly(client, WS_CLOSE.UPSTREAM_UNAVAILABLE, 'workspace agent unreachable');
       });
     },
   );
+}
+
+/**
+ * Cap on what a client may send before its upstream is ready: two frames at the
+ * server's `maxPayload`. The buffer also exists before the token is verified, so it
+ * must not be something an unauthenticated peer can grow without bound.
+ */
+const MAX_PENDING_BYTES = 8 * 1024 * 1024;
+
+function rawDataLength(data: RawData): number {
+  if (Array.isArray(data)) return data.reduce((sum, part) => sum + part.length, 0);
+  return data instanceof ArrayBuffer ? data.byteLength : data.length;
 }
 
 /** Only forward close codes that the `ws` library allows a peer to send. */

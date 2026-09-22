@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import {
   GitWorktrees,
   PerKeyMutex,
@@ -16,6 +16,7 @@ import {
   DEFAULT_GIT_PATHS,
   type AgentRunContext,
   type AgentRunEvent,
+  type AgentRunHandle,
   type AgentRuntime,
   type AuthMode,
   type ProviderId,
@@ -36,7 +37,7 @@ import {
   type TaskUsage,
 } from '@notea/db';
 import type { ClientIdentity } from '@notea/protocol';
-import { acquireIntegrationLease, releaseIntegrationLease } from './integration-lease';
+import { INTEGRATION_LEASE_MS, acquireIntegrationLease, releaseIntegrationLease } from './integration-lease';
 import type { ConnectWorkspace, CreateIsolatedSession } from './workspace-connection';
 
 export interface ProcessorLogger {
@@ -124,6 +125,9 @@ export async function runTask(deps: ProcessorDeps, task: AgentTask): Promise<voi
 
   const identity = agentIdentity(task);
   let connection: Awaited<ReturnType<ConnectWorkspace>> | null = null;
+  let handle: AgentRunHandle | null = null;
+  /** The event stream ended, which it only does once the agent process is gone. */
+  let streamEnded = false;
   let seq = 0;
   // Widened via assertion: TypeScript otherwise narrows these to `null` inside the loop.
   let usage = null as TaskUsage | null;
@@ -213,16 +217,17 @@ export async function runTask(deps: ProcessorDeps, task: AgentTask): Promise<voi
       command: task.command ?? undefined,
     };
     const agentSession = deps.isolate(task.workspaceId, owner.agentUid);
-    const handle = await runtime.start(ctx, agentSession);
-    await db.update(agentRuns).set({ sessionId: handle.sessionId, heartbeatAt: now() }).where(eq(agentRuns.id, run.id));
+    const started = await runtime.start(ctx, agentSession);
+    handle = started;
+    await db.update(agentRuns).set({ sessionId: started.sessionId, heartbeatAt: now() }).where(eq(agentRuns.id, run.id));
     await recordEvent(
       db,
       task.workspaceId,
       'task.run_started',
-      { taskId: task.id, runId: run.id, sessionId: handle.sessionId, agentName: task.agentName, agentUid: owner.agentUid, authMode },
+      { taskId: task.id, runId: run.id, sessionId: started.sessionId, agentName: task.agentName, agentUid: owner.agentUid, authMode },
       null,
     );
-    log.info('run started', { taskId: task.id, runId: run.id, sessionId: handle.sessionId, agentUid: owner.agentUid });
+    log.info('run started', { taskId: task.id, runId: run.id, sessionId: started.sessionId, agentUid: owner.agentUid });
 
     const heartbeat = setInterval(() => {
       void (async () => {
@@ -230,13 +235,13 @@ export async function runTask(deps: ProcessorDeps, task: AgentTask): Promise<voi
         const current = await db.query.agentTasks.findFirst({ where: eq(agentTasks.id, task.id), columns: { status: true } });
         if (current?.status === 'cancelled' && !cancelled) {
           cancelled = true;
-          await handle.cancel();
+          await started.cancel();
         }
       })().catch((err: unknown) => log.warn('heartbeat failed', { error: String(err) }));
     }, deps.heartbeatMs ?? 15_000);
 
     try {
-      for await (const event of handle.events) {
+      for await (const event of started.events) {
         await persistEvent(event);
         if (event.type === 'usage') {
           usage = {
@@ -247,6 +252,7 @@ export async function runTask(deps: ProcessorDeps, task: AgentTask): Promise<voi
         }
         if (event.type === 'finished') finished = event;
       }
+      streamEnded = true;
     } finally {
       clearInterval(heartbeat);
     }
@@ -291,6 +297,10 @@ export async function runTask(deps: ProcessorDeps, task: AgentTask): Promise<voi
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error('run failed', { taskId: task.id, runId: run.id, error: message });
+    // A failure while the agent is still running (an event that cannot be stored, a
+    // lost database connection) must not leave the CLI working, and spending, behind
+    // a task that now reads `failed`. First, before any write that could fail too.
+    if (handle && !streamEnded) await handle.cancel().catch(() => undefined);
     await db.update(agentRuns).set({ status: 'failed', endedAt: now(), summary: message }).where(eq(agentRuns.id, run.id));
     await db
       .update(agentTasks)
@@ -303,9 +313,25 @@ export async function runTask(deps: ProcessorDeps, task: AgentTask): Promise<voi
 }
 
 const integrationMutex = new PerKeyMutex();
+/**
+ * Tasks this process has claimed for integration, including those still waiting on
+ * the mutex. {@link recoverStaleIntegrations} must never take one of these back.
+ */
+const integratingHere = new Set<string>();
 
 /** Integrates one approved task (serialised per workspace). */
 export async function integrateApprovedTask(deps: ProcessorDeps, task: AgentTask): Promise<void> {
+  // Marked before the claim is even sent, so recovery cannot see the task in
+  // `integrating` without also seeing that this process owns it.
+  integratingHere.add(task.id);
+  try {
+    await claimAndIntegrate(deps, task);
+  } finally {
+    integratingHere.delete(task.id);
+  }
+}
+
+async function claimAndIntegrate(deps: ProcessorDeps, task: AgentTask): Promise<void> {
   const { db, log } = deps;
   const now = deps.now ?? (() => new Date());
 
@@ -355,13 +381,20 @@ export async function integrateApprovedTask(deps: ProcessorDeps, task: AgentTask
             : result.status === 'checks_failed'
               ? 'checks_failed'
               : 'failed';
-      if (nextStatus === 'done') await git.removeTaskWorktree(task.id);
       await db
         .update(agentTasks)
         .set({ status: nextStatus, lastLog: result.log, updatedAt: now(), finishedAt: nextStatus === 'done' ? now() : task.finishedAt })
         .where(eq(agentTasks.id, task.id));
       await recordEvent(db, task.workspaceId, 'task.integration', { taskId: task.id, result: result.status, nextStatus });
       log.info('integration finished', { taskId: task.id, result: result.status });
+      // Only after the outcome is recorded: the base branch already has the commits,
+      // so failing here must not turn the task into `failed`. The reaper removes a
+      // `done` task's worktree on its next pass if this does not.
+      if (nextStatus === 'done') {
+        await git.removeTaskWorktree(task.id).catch((err: unknown) => {
+          log.warn('worktree removal failed; the reaper will retry', { taskId: task.id, error: err instanceof Error ? err.message : String(err) });
+        });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await db.update(agentTasks).set({ status: 'failed', lastLog: message, updatedAt: now() }).where(eq(agentTasks.id, task.id));
@@ -389,6 +422,55 @@ export async function recoverStaleRuns(deps: ProcessorDeps): Promise<number> {
     await recordEvent(db, run.workspaceId, 'task.run_failed', { taskId: run.taskId, runId: run.id, error: 'stale worker' });
   }
   return stale.length;
+}
+
+/**
+ * Hands `integrating` tasks nobody is integrating any more back to `approved`, so the
+ * next tick integrates them again (D-042).
+ *
+ * The worker that claimed one stopped before it finished: a restart that outlasts
+ * TimeoutStopSec during a long check command, an OOM kill, a crash. Nothing else
+ * leads out of `integrating` — users cannot cancel it and the reaper skips any
+ * workspace with an active task — so without this the task, and the workspace's
+ * cleanup, would be stuck for good. Retrying is safe: a rebase that already finished
+ * is a no-op the second time, the checks simply run again, and a branch that was
+ * already fast-forwarded reports nothing to integrate.
+ *
+ * Abandoned means all three: this process is not integrating it, the workspace's
+ * integration lease is free or expired, and the claim is older than a lease — the
+ * last condition keeps a live integration in another worker safe even in the moment
+ * between its tasks when that worker's lease is released.
+ */
+export async function recoverStaleIntegrations(deps: ProcessorDeps): Promise<number> {
+  const { db, log } = deps;
+  const now = deps.now ?? (() => new Date());
+  const current = now();
+  const claimedBefore = new Date(current.getTime() - INTEGRATION_LEASE_MS);
+  const candidates = await db
+    .select({ id: agentTasks.id, workspaceId: agentTasks.workspaceId })
+    .from(agentTasks)
+    .innerJoin(workspaces, eq(workspaces.id, agentTasks.workspaceId))
+    .where(
+      and(
+        eq(agentTasks.status, 'integrating'),
+        lt(agentTasks.updatedAt, claimedBefore),
+        or(isNull(workspaces.integrationLockedBy), isNull(workspaces.integrationLockedUntil), lt(workspaces.integrationLockedUntil, current)),
+      ),
+    );
+  let recovered = 0;
+  for (const candidate of candidates) {
+    if (integratingHere.has(candidate.id)) continue;
+    const [task] = await db
+      .update(agentTasks)
+      .set({ status: 'approved', lastLog: 'the integration was interrupted before it finished; retrying it', updatedAt: current })
+      .where(and(eq(agentTasks.id, candidate.id), eq(agentTasks.status, 'integrating')))
+      .returning({ id: agentTasks.id });
+    if (!task) continue;
+    recovered += 1;
+    await recordEvent(db, candidate.workspaceId, 'task.integration_recovered', { taskId: candidate.id });
+    log.warn('re-queued an interrupted integration', { taskId: candidate.id });
+  }
+  return recovered;
 }
 
 export async function findApprovedTasks(db: Database, limit = 10): Promise<AgentTask[]> {

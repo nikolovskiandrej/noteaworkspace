@@ -284,6 +284,9 @@ export class AgentHub {
         requireRole(identity, 'editor');
         void this.respondAsync(client, message.reqId, async () => {
           const cwd = message.cwd ? await this.opts.fs.resolveAnyDir(message.cwd) : undefined;
+          // A client that disconnected during that await has already had its processes
+          // killed; one started for it now would run unowned until its timeout.
+          if (this.clients.get(client.id) !== client) throw new AgentError('bad_request', 'the connection closed before the process started');
           const { execId, pid } = this.opts.processes.start({
             ownerId: client.id,
             command: message.command,

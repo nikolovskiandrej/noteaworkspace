@@ -129,6 +129,46 @@ describe('IsolatedAgentSession', () => {
     expect(exits).toEqual([7]);
   });
 
+  it('stops a process whose stream was lost rather than leave it running unwatched', async () => {
+    // The stream ends without an exit frame: the connection went, not necessarily the process.
+    const transport = new FakeTransport([{ type: 'out', data: 'working\n' }]);
+    const session = new IsolatedAgentSession(transport, { workspaceId: 'ws-1', uid: 20003 });
+    const { sessionId } = await session.createTerminal({ cols: 80, rows: 24, command: 'x', args: [], cwd: '/', title: 't' });
+    const exits: (number | null)[] = [];
+    session.onTerminalExit(sessionId, (code) => exits.push(code));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(exits).toEqual([null]);
+    expect(transport.killed).toBe(1);
+
+    // A process that really exited is not signalled.
+    const finished = new FakeTransport([{ type: 'exit', exitCode: 0, timedOut: false }]);
+    await new IsolatedAgentSession(finished, { workspaceId: 'ws-1', uid: 20003 }).createTerminal({ cols: 80, rows: 24, command: 'x', args: [], cwd: '/', title: 't' });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(finished.killed).toBe(0);
+  });
+
+  it('keeps trying to stop a lost process while the orchestrator is restarting', async () => {
+    // The usual way to lose the stream is an orchestrator restart, so the first kills fail.
+    const transport = new FakeTransport([{ type: 'out', data: 'working\n' }]);
+    let attempts = 0;
+    const restarting = Object.assign(transport, {
+      agentExecStream: async (workspaceId: string, request: AgentExecRequest) => {
+        const started = await FakeTransport.prototype.agentExecStream.call(transport, workspaceId, request);
+        return {
+          ...started,
+          kill: async () => {
+            attempts += 1;
+            if (attempts < 3) throw new Error('orchestrator unreachable: connect ECONNREFUSED');
+          },
+        };
+      },
+    });
+    const session = new IsolatedAgentSession(restarting, { workspaceId: 'ws-1', uid: 20003, lostProcessRetryMs: 5 });
+    await session.createTerminal({ cols: 80, rows: 24, command: 'x', args: [], cwd: '/', title: 't' });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(attempts).toBe(3);
+  });
+
   it('writes run artefacts as the member, without putting content through a shell string', async () => {
     const transport = new FakeTransport();
     const session = new IsolatedAgentSession(transport, { workspaceId: 'ws-1', uid: 20003 });
