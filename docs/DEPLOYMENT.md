@@ -62,7 +62,7 @@ Read them out of Vercel first (Project → Settings → Environment Variables �
 |---|---|---|
 | `DATABASE_URL` | `postgres://user:pass@host:5432/notea?sslmode=require` — use the provider's **pooled** endpoint if it offers one (serverless opens many short connections) | from your database provider |
 | `AUTH_SECRET` | Auth.js session signing secret | **yes** |
-| `ORCHESTRATOR_URL` | `https://orchestrator.example.com` (server-to-server, REST) | your domain |
+| `ORCHESTRATOR_URL` | `https://orchestrator.noteawork.com` (server-to-server, REST) | this deployment's domain |
 | `ORCHESTRATOR_PUBLIC_URL` | same URL; browsers derive `wss://` from it for terminals | your domain |
 | `ORCHESTRATOR_API_KEY` | must equal the orchestrator's value | **set — copy to the host** |
 | `CREDENTIALS_KEY` | 64 hex chars; encrypts stored provider credentials; must equal the worker's value | **set — copy to the host** |
@@ -159,6 +159,24 @@ host before running two busy workspaces at once.
 check `apt-cache policy caddy` before step 1 and add Caddy's own repository if it comes
 back empty.
 
+### Pre-flight (verified 2026-09-22)
+
+| Fact | Value |
+|---|---|
+| Hostname | `orchestrator.noteawork.com` |
+| Host IPv4 | `178.105.211.58` (reverse DNS `static.58.211.105.178.clients.your-server.de` — Hetzner) |
+| DNS | **Live and correct.** The A record resolves straight to the origin IP. |
+| DNS provider | Cloudflare (`dakota`/`dana.ns.cloudflare.com`) |
+| Proxy status | **DNS-only (grey cloud) — keep it that way.** A proxied record terminates TLS at Cloudflare, so Caddy's ACME challenge never reaches this host and the browser's `wss://` terminal goes through Cloudflare's proxy instead of straight to the orchestrator. |
+| Port 22 | open (`OpenSSH_10.2p1`) |
+| Ports 80 / 443 / 4100 | **closed** — 80 and 443 must be opened before step 8 |
+
+The SSH banner reports OpenSSH 10.2p1, which is newer than Ubuntu 24.04's 9.6p1, so this
+host is probably a later Ubuntu release. Run `lsb_release -a` first: step 1 assumes 24.04,
+and both the `caddy` package and the NodeSource `setup_24.x` script need to know the
+release codename. If NodeSource has no repository for it, install Node 24 from the
+distribution or from a tarball instead.
+
 ```bash
 # 1. system packages
 sudo apt-get update && sudo apt-get install -y git curl caddy
@@ -214,20 +232,20 @@ sudo systemctl reload caddy
 
 Open ports 22, 80 and 443 in the firewall. 80 is not strictly required — Caddy falls back
 to the TLS-ALPN-01 challenge on 443 — but without it the HTTP-01 challenge and the
-automatic http→https redirect both fail. Point `orchestrator.<your-domain>` at the host's
-IPv4 address before reloading Caddy; it obtains the certificate and proxies WebSockets
-automatically.
+automatic http→https redirect both fail. **Both 80 and 443 were closed on this host when
+last checked**, so open them in the Hetzner Cloud Firewall *and* in any host firewall
+before reloading Caddy, or certificate issuance will simply fail.
 
 **9. Point the web app at this host.** `ORCHESTRATOR_URL` and `ORCHESTRATOR_PUBLIC_URL` on
 Vercel are still the placeholder `https://orchestrator.example.com`. Set both to
-`https://orchestrator.<your-domain>` and **redeploy** — changing an environment variable
+`https://orchestrator.noteawork.com` and **redeploy** — changing an environment variable
 does not affect the deployment already running. Until this is done §6 fails with
 `orchestrator unreachable`, however healthy the host is.
 
 ## 6. Verify the live system
 
-1. `curl https://orchestrator.example.com/healthz` → `{"ok":true,"service":"notea-orchestrator"}`.
-2. `curl -H 'Authorization: Bearer <ORCHESTRATOR_API_KEY>' https://orchestrator.example.com/workspaces` → `{"workspaces":[]}`; without the header → 401.
+1. `curl https://orchestrator.noteawork.com/healthz` → `{"ok":true,"service":"notea-orchestrator"}`.
+2. `curl -H 'Authorization: Bearer <ORCHESTRATOR_API_KEY>' https://orchestrator.noteawork.com/workspaces` → `{"workspaces":[]}`; without the header → 401.
 3. Open the Vercel URL, sign in with the account from step 6, create a workspace, open a
    terminal (`whoami` → `dev`), save a file from the editor.
 4. **Settings → AI & Claude → Connect** a credential, then **Check** it against the running

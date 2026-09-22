@@ -116,7 +116,7 @@ Repository: https://github.com/nikolovskiandrej/noteaworkspace (branch `main`).
 
 Verified live on 2026-09-16: `/sign-in` returns 200 and renders the form; `/` and `/settings/ai` 307 to sign-in with the correct `callbackUrl`; and a sign-in POST with a deliberately wrong password returns `302 → /sign-in?error=CredentialsSignin` rather than a 500 — which proves the deployed app reaches Neon, finds the user and runs the scrypt check. The five migrations are applied to the Neon database and the first account exists.
 
-**Only the control plane is deployed, and that is the whole of what Vercel can host.** Starting a workspace, terminals, the editor and agent tasks all need the orchestrator, the worker and Docker on a Linux host (`DEPLOYMENT.md` §5); `ORCHESTRATOR_URL`/`ORCHESTRATOR_PUBLIC_URL` are currently the placeholder `https://orchestrator.example.com`, which satisfies the schema in `apps/web/src/lib/env.ts` so sign-in works, and must be replaced with the real host before any workspace can start.
+**Only the control plane is deployed, and that is the whole of what Vercel can host.** Starting a workspace, terminals, the editor and agent tasks all need the orchestrator, the worker and Docker on a Linux host (`DEPLOYMENT.md` §5); `ORCHESTRATOR_URL`/`ORCHESTRATOR_PUBLIC_URL` are currently the placeholder `https://orchestrator.example.com`, which satisfies the schema in `apps/web/src/lib/env.ts` so sign-in works, and must be replaced with `https://orchestrator.noteawork.com` (and redeployed) before any workspace can start.
 
 Two dependency defects were found by deploying and are fixed (`717aa95`, `2338bc7`): `typescript`, `@types/node`, `vitest` and **`drizzle-orm`** were used by `apps/web` but declared only in the root `package.json` (or nowhere). Local npm hoisting hid this; Vercel installs only the target workspace, so it did not. `drizzle-orm` was the real one — production code (`src/app/api/workspaces/[id]/connect-token/route.ts`) importing an undeclared package.
 
@@ -125,10 +125,10 @@ What is ready: the production `next build` passes (7 routes), `docs/DEPLOYMENT.m
 What is missing (the list below replaces session 7's, which was written before the Vercel
 deployment happened and then contradicted the paragraph above it):
 
-- **No Linux host** for the orchestrator, worker, Docker and workspace containers. Vercel cannot host these: they need the Docker socket, hours-long WebSocket connections and a persistent disk. `DEPLOYMENT.md` §1 has the topology and §5 the procedure. This is the whole of what is left.
-- **No domain.** §5 step 8 needs `orchestrator.<domain>` pointing at the host's IPv4 address before Caddy can obtain a certificate.
+- **The Linux host exists but nothing is installed on it.** `178.105.211.58` (Hetzner; reverse DNS `…clients.your-server.de`) answers on port 22 with `OpenSSH_10.2p1` — newer than Ubuntu 24.04's 9.6p1, so check `lsb_release -a` before following §5 step 1. Ports **80, 443 and 4100 are closed**; 80 and 443 must be opened in the Hetzner Cloud Firewall before Caddy can obtain a certificate. Everything in `DEPLOYMENT.md` §5 is still to do.
+- ~~**No domain.**~~ **Done (2026-09-22).** `orchestrator.noteawork.com` → `178.105.211.58`, verified resolving. DNS is Cloudflare, **DNS-only (not proxied)**, which is what Caddy's ACME and the browser's direct `wss://` both need — do not turn the orange cloud on.
 - **The two shared secrets have not been read out of Vercel.** `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` exist on the deployed project but are not on the development machine, and the host must reuse those exact values (`DEPLOYMENT.md` §2). The Vercel CLI is still not installed or authenticated here, so this needs the owner.
-- **Vercel still points at the placeholder orchestrator.** `ORCHESTRATOR_URL`/`ORCHESTRATOR_PUBLIC_URL` are `https://orchestrator.example.com`; §5 step 9 replaces them, and a **redeploy** is required for the change to take effect.
+- **Vercel still points at the placeholder orchestrator.** `ORCHESTRATOR_URL`/`ORCHESTRATOR_PUBLIC_URL` are `https://orchestrator.example.com` and must become `https://orchestrator.noteawork.com`; §5 step 9, and a **redeploy** is required for the change to take effect.
 
 ## Session 8 (2026-09-20): pre-deployment preparation
 
