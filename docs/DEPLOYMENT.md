@@ -172,26 +172,57 @@ back empty.
 | OS | **Ubuntu 26.04.1 LTS**, kernel 7.0.0-30-generic, hostname `noteaworkspace`, 74.77 GB root disk |
 | Ports 80 / 443 / 4100 | **closed** — 80 and 443 must be opened before step 8 |
 
-**The host is Ubuntu 26.04.1 LTS, not the 24.04 step 1 was written for.** That matters for
-all three third-party sources in step 1, and each must be checked rather than assumed:
+**The host is Ubuntu 26.04.1 LTS (`resolute`), not the 24.04 step 1 was written for.** All
+three third-party sources were checked against that codename on 2026-09-22, and all three
+work:
 
-- **Node 24.** Do not reach for NodeSource first. Check `apt-cache policy nodejs`: if the
-  distribution already ships Node 24 or newer, use it and drop the NodeSource line
-  entirely — one less third-party apt repository on a host that holds provider tokens.
-  Only if the distribution is too old, check whether NodeSource publishes a repository for
-  this release's codename; if it does not, install from the official tarball.
-- **Caddy.** `apt-cache policy caddy`. If it is absent, add Caddy's own repository.
-- **Docker Engine.** `https://get.docker.com` refuses releases it has no repository for.
-  If it fails, install `docker.io` from the distribution or add Docker's repository using
-  the nearest supported codename.
+| Source | `resolute` | Note |
+|---|---|---|
+| `download.docker.com/linux/ubuntu` | **publishes it** | `get.docker.com` installs Docker CE unchanged |
+| `deb.nodesource.com/node_24.x` | no per-codename suite, but publishes **`nodistro`** | NodeSource is codename-independent now, so `setup_24.x` works on any release |
+| `dl.cloudsmith.io/public/caddy/stable` | **publishes it**, and `any-version` | Caddy's official install snippet works unchanged |
 
-Everything else in step 1 onwards is release-independent.
+Still prefer the distribution's own `nodejs` when its candidate is 24 or newer: one less
+third-party apt repository on a host that holds provider tokens. Check with
+`apt-cache policy nodejs` **after** `apt-get update` — on a fresh image the package cache
+is empty and every candidate reads as unavailable, which is not the same as absent.
+
+Everything from step 2 onwards is release-independent.
 
 ```bash
-# 1. system packages
-sudo apt-get update && sudo apt-get install -y git curl caddy
-curl -fsSL https://get.docker.com | sudo sh
-curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs
+# 1. system packages  (shown for a root shell; prefix with sudo if you are not root)
+apt-get update && apt-get -y upgrade
+apt-get install -y git curl ca-certificates
+
+# Node 24 — distribution package if its candidate is >= 24, else NodeSource.
+# Check the candidate FIRST: apt succeeds just as happily installing an older Node,
+# so "the install worked" is not the same as "the version is right".
+apt-cache policy nodejs
+apt-get install -y nodejs npm
+node --version                                   # must be v24 or newer
+# Only if it is older, replace it with NodeSource's build:
+#   apt-get purge -y nodejs npm && apt-get autoremove -y
+#   curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y nodejs
+npm --version                                    # npm 11 expected alongside node 24
+
+# Caddy — distribution package if present, else Caddy's own repository.
+apt-cache policy caddy
+apt-get install -y caddy   ||   {
+  apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
+  apt-get update && apt-get install -y caddy
+}
+
+# Docker Engine
+curl -fsSL https://get.docker.com | sh
+
+# Swap: cloud images ship with none, and 8 GB is tight (see the sizing note above).
+if ! swapon --show | grep -q .; then
+  fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  echo 'vm.swappiness=10' > /etc/sysctl.d/99-notea-swappiness.conf && sysctl -p /etc/sysctl.d/99-notea-swappiness.conf
+fi
 
 # 2. a service account that may talk to Docker (the orchestrator needs the socket)
 sudo useradd -r -m -d /opt/notea-workspace -s /bin/bash notea
