@@ -93,7 +93,7 @@ The headline: **no isolated agent run could last more than 10 minutes, or surviv
 
 Also fixed and verified in a real container or browser: Gemini runs could not start in a fresh workspace; the editor lost unsaved edits on every reconnect (reproduced on the old build in headless Chrome); the bridge dropped the UI's first request when the token check was slow. The worker no longer hangs on a dropped workspace connection, recovers integrations its predecessor abandoned, and cannot mark an integrated task `failed`.
 
-State left behind: this session's work is one commit on top of `a4a42c3` (then `origin/main`), on branch `session-10-review` until `main` is fast-forwarded to it, and not pushed; `notea/workspace:dev` was rebuilt with the fixed agent daemon, but the demo workspace's running container predates it (stop and start it from the UI to recreate it). The test database was left as the suites leave it.
+State left behind: this session's work is `6be44b6` on `main`, pushed to GitHub (which also redeploys the control plane on Vercel); `notea/workspace:dev` was rebuilt with the fixed agent daemon, but the demo workspace's running container predates it (stop and start it from the UI to recreate it). The test database was left as the suites leave it.
 
 ## 23a. Prior state (session 8)
 
