@@ -169,13 +169,23 @@ back empty.
 | DNS provider | Cloudflare (`dakota`/`dana.ns.cloudflare.com`) |
 | Proxy status | **DNS-only (grey cloud) — keep it that way.** A proxied record terminates TLS at Cloudflare, so Caddy's ACME challenge never reaches this host and the browser's `wss://` terminal goes through Cloudflare's proxy instead of straight to the orchestrator. |
 | Port 22 | open (`OpenSSH_10.2p1`) |
+| OS | **Ubuntu 26.04.1 LTS**, kernel 7.0.0-30-generic, hostname `noteaworkspace`, 74.77 GB root disk |
 | Ports 80 / 443 / 4100 | **closed** — 80 and 443 must be opened before step 8 |
 
-The SSH banner reports OpenSSH 10.2p1, which is newer than Ubuntu 24.04's 9.6p1, so this
-host is probably a later Ubuntu release. Run `lsb_release -a` first: step 1 assumes 24.04,
-and both the `caddy` package and the NodeSource `setup_24.x` script need to know the
-release codename. If NodeSource has no repository for it, install Node 24 from the
-distribution or from a tarball instead.
+**The host is Ubuntu 26.04.1 LTS, not the 24.04 step 1 was written for.** That matters for
+all three third-party sources in step 1, and each must be checked rather than assumed:
+
+- **Node 24.** Do not reach for NodeSource first. Check `apt-cache policy nodejs`: if the
+  distribution already ships Node 24 or newer, use it and drop the NodeSource line
+  entirely — one less third-party apt repository on a host that holds provider tokens.
+  Only if the distribution is too old, check whether NodeSource publishes a repository for
+  this release's codename; if it does not, install from the official tarball.
+- **Caddy.** `apt-cache policy caddy`. If it is absent, add Caddy's own repository.
+- **Docker Engine.** `https://get.docker.com` refuses releases it has no repository for.
+  If it fails, install `docker.io` from the distribution or add Docker's repository using
+  the nearest supported codename.
+
+Everything else in step 1 onwards is release-independent.
 
 ```bash
 # 1. system packages
