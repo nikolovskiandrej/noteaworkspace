@@ -295,11 +295,13 @@ does not affect the deployment already running. Until this is done §6 fails wit
 5. Create a task, watch it reach `needs_review`, approve it, confirm the commit on `main`
    from the terminal.
 
-**Caveat — `AGENT_CONNECT_MODE=network` has not been exercised on a Linux host**
-(`CURRENT_STATE.md`, known issue 10): every verification so far ran on Docker Desktop with
-`published`. If `/workspaces/:id/start` times out waiting for the agent on Linux, set
-`AGENT_CONNECT_MODE=published` (the orchestrator then reaches containers through a port
-published on 127.0.0.1, which is what development uses) and restart the orchestrator.
+**`AGENT_CONNECT_MODE=network` is verified on Linux** (`CURRENT_STATE.md`, known issue 10,
+resolved in session 8): development moved to Ubuntu 26.04, where `auto` resolves to
+`network`, and the Docker e2e, a live two-client session and a real authenticated agent run
+all went over it with no published port. It is no longer the risk this section used to warn
+about. If `/workspaces/:id/start` ever does time out waiting for the agent, `published`
+remains a working fallback — the orchestrator then reaches containers through a port on
+127.0.0.1, so nothing becomes publicly reachable — but expect not to need it.
 
 ## 7. Operations
 
