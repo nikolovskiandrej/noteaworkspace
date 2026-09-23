@@ -1,15 +1,15 @@
 # Notea Workspace — Deployment
 
-Last updated: 2026-09-23 (session 11). Status: **both halves are deployed.** `apps/web` is
+Last updated: 2026-09-24 (session 12). Status: **both halves are deployed.** `apps/web` is
 live on Vercel against a Neon Postgres, and the runtime host `orchestrator.noteawork.com`
 (§5) runs Caddy, the orchestrator, the worker and Docker; it was set up on 2026-09-22 and
-upgraded to current code in session 11. §3–§5 are now a record of what was done, and §7 is
+upgraded to current code in sessions 11 and 12. §3–§5 are now a record of what was done, and §7 is
 how to operate it. What is verified in the
 software itself is in `CURRENT_STATE.md`.
 
 **Host state, 2026-09-23.** Ubuntu 26.04.1, 4 vCPU / 7.6 GB, 4 GB swap. Docker 29.8.1,
 Node 24.21, Caddy with a Let's Encrypt certificate (valid to 2026-12-21, renewed by Caddy),
-the `notea` service account (in `docker`), `/opt/notea-workspace/app` at `3c7382f` pulled
+the `notea` service account (in `docker`), `/opt/notea-workspace/app` at `69f29f1` (session 12) pulled
 through a read-only deploy key, `.env` mode 600 against the Neon database, and
 `notea-orchestrator` + `notea-worker` enabled. Checked from outside: `/healthz` answers over
 TLS, the REST API returns 401 without the key, HTTP redirects to HTTPS, and probes for

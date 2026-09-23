@@ -8,7 +8,7 @@ Self-hosted, browser-based shared development workspace: one persistent Linux co
 
 ## 2. Current goal
 
-1. ~~**Deploy the runtime host.**~~ **Done**: both halves are live. The host (`orchestrator.noteawork.com`) was set up on 2026-09-22, upgraded to current code in session 11, and rebooted onto its updated kernel (`7.0.0-31`) the same day; everything came back on its own.
+1. ~~**Deploy the runtime host.**~~ **Done**: both halves are live. The host (`orchestrator.noteawork.com`) was set up on 2026-09-22, upgraded to current code in sessions 11 and 12, and rebooted onto its updated kernel (`7.0.0-31`) the same day; everything came back on its own.
 2. **Use it for real, remotely**: sign in on the Vercel URL and open `notea`. Your Claude terminal starts by itself; the first time, sign in with your own Claude account inside it (subscription login → open the link or press `c` → paste the code). Then give it a first prompt. Only the members can do this (it needs their passwords and Claude accounts); nobody has signed in to a Claude terminal yet, locally or in production.
 3. **Niche signs in to his own Claude** (`niche@notea.mk`, an editor in `notea` since session 11) the same way, in his own terminal. Then both work at once: the two-members-two-accounts case the product exists for, now through the terminals rather than tasks. No credential needs pasting under Settings for this.
 4. Codex and Gemini authenticated runs, which need an OpenAI and a Google credential and have their own parsers.
@@ -90,7 +90,7 @@ No longer untested as of session 8: `network` connect mode, and an authenticated
 
 **The middle of the workspace page is one Claude terminal per member who can write**, side by side on the same project: "Andrej's Claude" and "Niche's Claude" in `notea`. Each runs as its member's own uid with the login they make in it, everyone watches all of them live, and only its member can type (D-045, `ARCHITECTURE.md` §4b). The file tree, the editor and the shell tabs are gone; People, Activity and Tasks stay on the right. Suite 195 → **240** passed / 4 skipped, typecheck clean, production build 8 routes, 4 Docker e2e green six runs in a row, both members' views driven in headless Chrome on throw-away data. Details: `CURRENT_STATE.md` → Session 12.
 
-State left behind: see `CURRENT_STATE.md` → Session 12 for what was pushed and deployed. No image rebuild was needed. The throw-away `notea_ui` database, workspace and container used for the browser pass were removed; no local service is left running.
+State left behind: `69f29f1` is on `main`, deployed by Vercel, and running on the host (pulled, `npm ci`, both units restarted; no image rebuild was needed). Verified there without starting anything: the token route wants the key, Caddy carries the new WebSocket path, and a real token for `notea` reaches the container lookup (the workspace is stopped). Nobody has opened a Claude terminal in production yet. The throw-away `notea_ui` database, workspace and container used for the browser pass were removed; no local service is left running.
 
 ### Session 11 (previous)
 
