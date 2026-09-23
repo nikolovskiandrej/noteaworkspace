@@ -4,7 +4,7 @@ Last updated: 2026-09-23 (session 11). Status: **both halves are deployed.** `ap
 live on Vercel against a Neon Postgres, and the runtime host `orchestrator.noteawork.com`
 (§5) runs Caddy, the orchestrator, the worker and Docker; it was set up on 2026-09-22 and
 upgraded to current code in session 11. §3–§5 are now a record of what was done, and §7 is
-how to operate it. The host still waits for one reboot (below). What is verified in the
+how to operate it. What is verified in the
 software itself is in `CURRENT_STATE.md`.
 
 **Host state, 2026-09-23.** Ubuntu 26.04.1, 4 vCPU / 7.6 GB, 4 GB swap. Docker 29.8.1,
@@ -13,10 +13,8 @@ the `notea` service account (in `docker`), `/opt/notea-workspace/app` at `3c7382
 through a read-only deploy key, `.env` mode 600 against the Neon database, and
 `notea-orchestrator` + `notea-worker` enabled. Checked from outside: `/healthz` answers over
 TLS, the REST API returns 401 without the key, HTTP redirects to HTTPS, and probes for
-`/.env` or `/.git/config` get 404. Pending:
-- **A reboot**: a kernel (`7.0.0-31`) and libc update are installed and
-  `/var/run/reboot-required` is set. `systemctl reboot` when no workspace is in use; every
-  service comes back on its own.
+`/.env` or `/.git/config` get 404. The host was rebooted onto kernel `7.0.0-31` the same day,
+and every service came back on its own. Pending:
 - **Hardening, recommended**: sshd still allows password logins (no account can use one
   today, since root is key-only and `notea` has none); set `PasswordAuthentication no`. `ufw`
   is inactive; only 22, 80 and 443 listen publicly, with 4100 bound to 127.0.0.1.
