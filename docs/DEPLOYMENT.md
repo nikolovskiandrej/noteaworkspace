@@ -14,10 +14,17 @@ through a read-only deploy key, `.env` mode 600 against the Neon database, and
 `notea-orchestrator` + `notea-worker` enabled. Checked from outside: `/healthz` answers over
 TLS, the REST API returns 401 without the key, HTTP redirects to HTTPS, and probes for
 `/.env` or `/.git/config` get 404. The host was rebooted onto kernel `7.0.0-31` the same day,
-and every service came back on its own. Pending:
-- **Hardening, recommended**: sshd still allows password logins (no account can use one
-  today, since root is key-only and `notea` has none); set `PasswordAuthentication no`. `ufw`
-  is inactive; only 22, 80 and 443 listen publicly, with 4100 bound to 127.0.0.1.
+and every service came back on its own. Hardened the same day:
+- **SSH is key-only.** `/etc/ssh/sshd_config.d/10-notea-hardening.conf` sets
+  `PasswordAuthentication no` and `KbdInteractiveAuthentication no`; root logs in with its
+  key (`PermitRootLogin prohibit-password`). A client offering no key is refused with
+  `Permission denied (publickey)`.
+- **`ufw` is active** and enabled at boot: incoming denied by default, allowed 22/tcp,
+  80/tcp, 443/tcp and 443/udp (Caddy's HTTP/3), on IPv4 and IPv6; outgoing allowed. The
+  orchestrator's 4100 stays bound to 127.0.0.1. Docker's `DOCKER-USER`/`DOCKER-FORWARD`
+  jumps still come first in `FORWARD`, so containers keep their network: the host reaches the
+  agent, containers reach GitHub, the Anthropic API and DNS, and the reaper's passes go
+  through. To open another port later: `ufw allow <port>/tcp`.
 
 **Before §5, read §2's COPY note.** `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` already
 exist on the Vercel project; the host must reuse those exact values.
