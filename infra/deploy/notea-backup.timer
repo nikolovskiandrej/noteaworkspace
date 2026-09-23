@@ -1,0 +1,11 @@
+# Runs notea-backup.service every night (docs/DEPLOYMENT.md §7). Persistent: a night
+# the host was off is made up at the next boot.
+[Unit]
+Description=Nightly Notea Workspace backup
+
+[Timer]
+OnCalendar=*-*-* 03:30 Europe/Skopje
+Persistent=true
+
+[Install]
+WantedBy=timers.target

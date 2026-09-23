@@ -1,0 +1,17 @@
+# systemd unit for the nightly backup (docs/DEPLOYMENT.md §7), started by
+# notea-backup.timer. Runs as root: it reads Docker's volume directories and the
+# notea user's .env, and writes the root-only /var/backups/notea.
+[Unit]
+Description=Notea Workspace backup (workspace volumes and database)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/notea-backup
+# Stay out of the way of anyone working late.
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
