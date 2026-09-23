@@ -184,7 +184,13 @@ export interface TaskView {
 }
 
 export async function listTasksForWorkspace(db: Database, workspaceId: string, options: { eventsForTaskIds?: string[]; maxEvents?: number } = {}): Promise<TaskView[]> {
-  const tasks = await db.query.agentTasks.findMany({ where: eq(agentTasks.workspaceId, workspaceId), orderBy: desc(agentTasks.createdAt), limit: 100 });
+  // The id breaks ties between tasks created in the same instant, so the list does not
+  // reshuffle on every refresh.
+  const tasks = await db.query.agentTasks.findMany({
+    where: eq(agentTasks.workspaceId, workspaceId),
+    orderBy: [desc(agentTasks.createdAt), desc(agentTasks.id)],
+    limit: 100,
+  });
   const views: TaskView[] = [];
   for (const task of tasks) {
     const latestRun = (await db.query.agentRuns.findFirst({ where: eq(agentRuns.taskId, task.id), orderBy: desc(agentRuns.attempt) })) ?? null;

@@ -64,7 +64,7 @@ A shared live AI engineering workspace:
 6. Edit files; run the app; see it in a preview tab (preview proxying is a later milestone).
 7. Invite a collaborator by email; they sign in and land in the same workspace.
 8. Both see the same terminals, the same files, and who is doing what.
-9. Start an AI agent on a task; the agent's terminal appears as a participant everyone can watch.
+9. Start an AI agent on a task; the agent appears as a participant, and everyone can follow its run log in the task (since D-039 a run is no longer a terminal session, so it cannot be attached to live).
 10. Start a second agent on a different task with a different provider; the coordinator gives each its own worktree and warns on overlapping scopes.
 11. Finished tasks are integrated one at a time after checks pass; humans approve when the workspace policy says so.
 12. Stop the workspace; files, shell history and tool logins persist on the volume; start it again tomorrow.
@@ -77,7 +77,7 @@ A shared live AI engineering workspace:
 | **M1 Personal workspace** | "I can create a Notea Workspace in a browser and get a terminal in a remote Linux environment." Web app with sign-in, workspace list, terminal UI, file tree + editor. | implemented; tested; verified in Chrome (2026-09-15) |
 | **M2 Remote access** | "I can reach the same workspace from another computer." Single-VPS deployment with TLS, password auth, hardened defaults. | planned (deployment); auth and hardening exist |
 | **M3 Multiplayer** | "Two people can use the same workspace simultaneously." Invites, roles, shared terminals with presence, file-change notifications, activity feed. | partially implemented (members/roles/presence/shared terminals/change notices/activity); invite links and watcher pending |
-| **M4 Agents in the workspace** | "AI coding agents can operate inside the workspace." Headless task runs in worktrees; provider credentials scoped per run; runs watchable as terminals. | implemented; tested; verified in Docker with the generic runtime; real Claude Code run pending |
+| **M4 Agents in the workspace** | "AI coding agents can operate inside the workspace." Headless task runs in worktrees; provider credentials scoped per run; runs followed through their run log. | implemented; tested; authenticated Claude Code runs end to end (sessions 7 and 8); Codex and Gemini await credentials |
 | **M5 Coordination** | Tasks, scope leases, integration queue, approvals, cost tracking. | implemented (leases, serialized integration, approvals, basic usage); budgets pending |
 | **M6 Previews and deployment** | Port detection and proxied preview URLs; later deployment targets. | planned |
 

@@ -17,6 +17,7 @@ import {
   startWorkspace,
   stopWorkspace,
 } from './workspaces';
+import { stayOnPage } from './stay-on-page';
 import { approveTask, cancelTask, createTask, deleteTask, requeueTask, updatePolicy } from './tasks';
 
 async function requireUserId(): Promise<string> {
@@ -82,8 +83,7 @@ export async function startWorkspaceAction(formData: FormData): Promise<void> {
   } catch (err) {
     withError(returnTo, err);
   }
-  revalidatePath(returnTo);
-  redirect(returnTo);
+  await stayOnPage(returnTo);
 }
 
 export async function stopWorkspaceAction(formData: FormData): Promise<void> {
@@ -95,8 +95,7 @@ export async function stopWorkspaceAction(formData: FormData): Promise<void> {
   } catch (err) {
     withError(returnTo, err);
   }
-  revalidatePath(returnTo);
-  redirect(returnTo);
+  await stayOnPage(returnTo);
 }
 
 export async function deleteWorkspaceAction(formData: FormData): Promise<void> {
@@ -125,8 +124,7 @@ export async function addMemberAction(formData: FormData): Promise<void> {
   } catch (err) {
     withError(returnTo, err);
   }
-  revalidatePath(returnTo);
-  redirect(returnTo);
+  await stayOnPage(returnTo);
 }
 
 export async function removeMemberAction(formData: FormData): Promise<void> {
@@ -138,8 +136,7 @@ export async function removeMemberAction(formData: FormData): Promise<void> {
   } catch (err) {
     withError(returnTo, err);
   }
-  revalidatePath(returnTo);
-  redirect(returnTo);
+  await stayOnPage(returnTo);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,8 +164,7 @@ export async function createTaskAction(formData: FormData): Promise<void> {
   } catch (err) {
     withError(returnTo, err);
   }
-  revalidatePath(returnTo);
-  redirect(returnTo);
+  await stayOnPage(returnTo);
 }
 
 async function taskTransitionAction(formData: FormData, fn: (db: ReturnType<typeof getDb>, userId: string, taskId: string) => Promise<void>): Promise<void> {
@@ -179,8 +175,7 @@ async function taskTransitionAction(formData: FormData, fn: (db: ReturnType<type
   } catch (err) {
     withError(returnTo, err);
   }
-  revalidatePath(returnTo);
-  redirect(returnTo);
+  await stayOnPage(returnTo);
 }
 
 export async function approveTaskAction(formData: FormData): Promise<void> {
@@ -213,8 +208,7 @@ export async function updatePolicyAction(formData: FormData): Promise<void> {
   } catch (err) {
     withError(returnTo, err);
   }
-  revalidatePath(returnTo);
-  redirect(returnTo);
+  await stayOnPage(returnTo);
 }
 
 const AI_SETTINGS = '/settings/ai';
@@ -231,8 +225,7 @@ export async function addCredentialAction(formData: FormData): Promise<void> {
   } catch (err) {
     withError(AI_SETTINGS, err);
   }
-  revalidatePath(AI_SETTINGS);
-  redirect(AI_SETTINGS);
+  await stayOnPage(AI_SETTINGS);
 }
 
 export async function deleteCredentialAction(formData: FormData): Promise<void> {
@@ -242,8 +235,7 @@ export async function deleteCredentialAction(formData: FormData): Promise<void> 
   } catch (err) {
     withError(AI_SETTINGS, err);
   }
-  revalidatePath(AI_SETTINGS);
-  redirect(AI_SETTINGS);
+  await stayOnPage(AI_SETTINGS);
 }
 
 /**

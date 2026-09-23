@@ -94,10 +94,10 @@ Terminals: node-pty, multi-attach, 256 KB scrollback replay, last-writer-wins re
 One WebSocket per tab or per worker connection; orchestrator is a pure pipe after verification; identify-first; JSON frames; presence derived from live connections; control-plane data (tasks, activity) is server-rendered and refreshed every 5 s while tasks are active.
 
 ## 7. Control plane
-Next.js 16 App Router, server components + server actions, route handlers only for the connect token and Auth.js. Auth.js v5 credentials provider with scrypt hashes, JWT sessions, `proxy.ts` as a convenience gate (every action re-checks membership). Drizzle over postgres.js. Dev: root `.env` is loaded by `next.config.ts`; `allowedDevOrigins` includes 127.0.0.1.
+Next.js 16 App Router, server components + server actions, route handlers only for the connect token and Auth.js. Auth.js v5 credentials provider with scrypt hashes, JWT sessions, `proxy.ts` as a convenience gate (every action re-checks membership). Drizzle over postgres.js. Dev: root `.env` is loaded by `next.config.ts`; `allowedDevOrigins` includes 127.0.0.1. A server action that stays on its page ends by revalidating it, not by redirecting to it, so the page and the editor's unsaved text stay mounted (D-043). The UI's colours, type and motion are tokens in `globals.css` (D-044).
 
 ## 8. Deployment topology
-Development on Windows + Docker Desktop (verified). Production for personal use (planned, M2): one Linux VPS with compose (caddy, web, orchestrator with docker socket, worker, postgres on a control-only network). Guard the host's disk: builds, volumes and the Docker VM disk share it; a full disk turned Docker read-only during development. On this machine that risk was removed by moving Docker's data disk to D: — see §12.
+Development on Ubuntu 26.04 with Docker Engine (since session 8; Windows + Docker Desktop before that). Production (`DEPLOYMENT.md`): the control plane on Vercel with Postgres on Neon (deployed), and one Linux host running the orchestrator, the worker, Docker and the workspace containers behind Caddy (templates in `infra/deploy/`; the host is not set up yet). Guard the host's disk: builds, images and volumes share it, and a full disk once turned Docker read-only during development (§12 is that Windows-era history).
 
 ## 9. The hard problems: status
 | Problem | Status |

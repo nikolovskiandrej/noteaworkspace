@@ -106,6 +106,33 @@ describeDb('tasks and credentials services', () => {
     expect(await listTasksForWorkspace(handle.db, workspaceId)).toEqual([]);
   });
 
+  it('lists tasks created in the same instant in a stable order', async () => {
+    // Several tasks can share a created_at (one statement, or a coarse clock). Ordered by
+    // the timestamp alone they came back in whatever order Postgres chose each time, so
+    // the auto-refreshed list reshuffled itself.
+    const createdAt = new Date('2026-09-23T05:24:26.265Z');
+    const rows = await handle.db
+      .insert(agentTasks)
+      .values(
+        ['a', 'b', 'c', 'd'].map((title) => ({
+          workspaceId,
+          title,
+          description: 'same instant',
+          runtime: 'generic-cli',
+          agentName: 'agent',
+          command: 'true',
+          createdBy: ownerId,
+          createdAt,
+        })),
+      )
+      .returning({ id: agentTasks.id });
+    const expected = rows.map((r) => r.id).sort().reverse();
+    for (let i = 0; i < 5; i += 1) {
+      expect((await listTasksForWorkspace(handle.db, workspaceId)).map((v) => v.task.id)).toEqual(expected);
+    }
+    await handle.db.delete(agentTasks).where(inArray(agentTasks.id, expected));
+  });
+
   it('lets only the owner change the coordination policy', async () => {
     await expect(updatePolicy(handle.db, viewerId, workspaceId, { integration: 'auto' })).rejects.toBeInstanceOf(ForbiddenError);
     await updatePolicy(handle.db, ownerId, workspaceId, { integration: 'auto', checkCommand: 'npm test', baseBranch: 'main' });

@@ -1,12 +1,16 @@
+import { KeyRound, Play, Square } from 'lucide-react';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { DEFAULT_COORDINATION_POLICY } from '@notea/db';
 import { auth } from '@/auth';
 import { AutoRefresh } from '@/components/auto-refresh';
 import { StatusBadge } from '@/components/status-badge';
-import { TopBar } from '@/components/top-bar';
+import { Crumb, TopBar } from '@/components/top-bar';
+import { Notice } from '@/components/ui/notice';
+import { SubmitButton } from '@/components/ui/submit-button';
+import { WorkspaceActions } from '@/components/workspace-actions';
 import { WorkspaceView } from '@/components/workspace-view';
-import { deleteWorkspaceAction, startWorkspaceAction, stopWorkspaceAction } from '@/lib/actions';
+import { startWorkspaceAction, stopWorkspaceAction } from '@/lib/actions';
 import { listCredentials } from '@/lib/credentials';
 import { getDb } from '@/lib/db';
 import { env } from '@/lib/env';
@@ -68,55 +72,69 @@ export default async function WorkspacePage({
   return (
     <div className="flex h-full flex-col">
       <AutoRefresh intervalMs={5000} enabled={anyActive} />
-      <TopBar userName={session.user.name ?? 'you'}>
-        <Link href="/" className="text-[#6f7782] hover:text-[#c3c8d0]">
-          Workspaces
-        </Link>
-        <span className="text-[#3a404a]">/</span>
-        <span className="font-medium text-[#e6e9ee]">{workspace.name}</span>
-        <StatusBadge status={status} />
-        {role !== 'viewer' ? (
-          status === 'running' ? (
-            <form action={stopWorkspaceAction}>
-              <input type="hidden" name="workspaceId" value={workspace.id} />
-              <input type="hidden" name="returnTo" value={returnTo} />
-              <button className="rounded border border-[#2b313b] px-2 py-0.5 text-xs hover:bg-[#1c2027]">Stop</button>
-            </form>
-          ) : (
-            <form action={startWorkspaceAction}>
-              <input type="hidden" name="workspaceId" value={workspace.id} />
-              <input type="hidden" name="returnTo" value={returnTo} />
-              <button className="rounded border border-emerald-500/40 px-2 py-0.5 text-xs text-emerald-300 hover:bg-emerald-500/10">
-                Start
-              </button>
-            </form>
-          )
-        ) : null}
-        <Link href="/settings/ai" className="ml-auto text-xs text-[#6f7782] hover:text-[#c3c8d0]">
-          AI &amp; Claude
-        </Link>
-        {role === 'owner' ? (
-          <form action={deleteWorkspaceAction} className="flex items-center gap-1">
-            <input type="hidden" name="workspaceId" value={workspace.id} />
-            <input type="hidden" name="expectedSlug" value={workspace.slug} />
-            <input type="hidden" name="returnTo" value={returnTo} />
-            <input
-              name="confirmSlug"
-              placeholder={`type ${workspace.slug} to delete`}
-              className="mono w-44 rounded border border-[#2b313b] bg-[#0e1014] px-2 py-0.5 text-xs outline-none focus:border-rose-500/60"
-            />
-            <button className="rounded border border-rose-500/30 px-2 py-0.5 text-xs text-rose-300 hover:bg-rose-500/10">Delete workspace</button>
-          </form>
-        ) : null}
+      <TopBar
+        userName={session.user.name ?? 'you'}
+        userEmail={session.user.email}
+        actions={
+          <>
+            {role !== 'viewer' ? (
+              status === 'running' ? (
+                <form action={stopWorkspaceAction}>
+                  <input type="hidden" name="workspaceId" value={workspace.id} />
+                  <input type="hidden" name="returnTo" value={returnTo} />
+                  <SubmitButton
+                    className="btn-ghost btn-sm"
+                    icon={<Square aria-hidden />}
+                    pendingLabel="Stopping…"
+                    aria-label="Stop workspace"
+                    title="Stop the container. Files and history are kept."
+                  >
+                    <span className="hidden sm:inline">Stop</span>
+                  </SubmitButton>
+                </form>
+              ) : (
+                <form action={startWorkspaceAction}>
+                  <input type="hidden" name="workspaceId" value={workspace.id} />
+                  <input type="hidden" name="returnTo" value={returnTo} />
+                  <SubmitButton className="btn-primary btn-sm" icon={<Play aria-hidden />} pendingLabel="Starting…">
+                    Start
+                  </SubmitButton>
+                </form>
+              )
+            ) : null}
+            <Link href="/settings/ai" className="btn btn-ghost btn-sm hidden md:inline-flex">
+              <KeyRound aria-hidden />
+              AI &amp; Claude
+            </Link>
+            {role === 'owner' ? <WorkspaceActions workspaceId={workspace.id} slug={workspace.slug} name={workspace.name} returnTo={returnTo} /> : null}
+          </>
+        }
+      >
+        <Crumb href="/">Workspaces</Crumb>
+        <Crumb>{workspace.name}</Crumb>
+        <StatusBadge status={status} className="ml-0.5" />
       </TopBar>
-      {error ? <p className="border-b border-rose-500/30 bg-rose-500/10 px-4 py-2 text-sm text-rose-300">{error}</p> : null}
+      {error ? (
+        <div className="flex-none border-b border-line bg-panel px-3 py-2 sm:px-4">
+          <Notice tone="danger" dismissHref={returnTo}>
+            {error}
+          </Notice>
+        </div>
+      ) : null}
       <WorkspaceView
         workspaceId={workspace.id}
         slug={workspace.slug}
         role={role}
         running={showLive}
         members={members}
-        events={events.map((e) => ({ id: e.id, type: e.type, actorKind: e.actorKind, createdAt: e.createdAt.toISOString(), payload: e.payload as Record<string, unknown> }))}
+        events={events.map((e) => ({
+          id: e.id,
+          type: e.type,
+          actorKind: e.actorKind,
+          actorId: e.actorId,
+          createdAt: e.createdAt.toISOString(),
+          payload: e.payload as Record<string, unknown>,
+        }))}
         currentUserId={session.user.id}
         returnTo={returnTo}
         tasks={{

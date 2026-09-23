@@ -1,19 +1,63 @@
 import Link from 'next/link';
-import { signOutAction } from '@/lib/actions';
+import type { ReactNode } from 'react';
+import { UserMenu } from './user-menu';
+import { Wordmark } from './wordmark';
 
-export function TopBar({ userName, children }: { userName: string; children?: React.ReactNode }) {
+/**
+ * The bar at the top of every signed-in page: the wordmark, a breadcrumb (children),
+ * the page's own actions, and the account menu.
+ */
+export function TopBar({
+  userName,
+  userEmail,
+  actions,
+  children,
+}: {
+  userName: string;
+  userEmail?: string | null;
+  actions?: ReactNode;
+  children?: ReactNode;
+}) {
   return (
-    <header className="flex h-11 shrink-0 items-center gap-4 border-b border-[#232830] bg-[#14171c] px-4 text-sm">
-      <Link href="/" className="font-semibold tracking-tight text-emerald-300">
-        Notea Workspace
+    <header className="sticky top-0 z-40 flex h-12 flex-none items-center gap-2 border-b border-line bg-panel px-2.5 sm:gap-3 sm:px-4">
+      <Link href="/" className="flex h-8 flex-none items-center rounded-md px-1.5" aria-label="Notea Workspace, all workspaces">
+        <Wordmark compact />
       </Link>
-      <div className="flex min-w-0 flex-1 items-center gap-3">{children}</div>
-      <span className="text-[#9aa1ab]">{userName}</span>
-      <form action={signOutAction}>
-        <button type="submit" className="rounded border border-[#2b313b] px-2 py-0.5 text-xs text-[#c3c8d0] hover:bg-[#1c2027]">
-          Sign out
-        </button>
-      </form>
+      <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-2 text-[13px]">
+        {children}
+      </nav>
+      {actions ? <div className="flex flex-none items-center gap-1.5">{actions}</div> : null}
+      <UserMenu name={userName} email={userEmail} />
     </header>
+  );
+}
+
+/**
+ * One breadcrumb step: a link while there is somewhere to go back to, text for the
+ * current page. Intermediate steps give way on narrow screens; the wordmark already
+ * leads home.
+ */
+export function Crumb({ href, children }: { href?: string; children: ReactNode }) {
+  if (href) {
+    return (
+      <span className="hidden flex-none items-center gap-2 sm:flex">
+        <span className="text-fg-faint" aria-hidden>
+          /
+        </span>
+        <Link href={href} className="rounded text-fg-subtle transition-colors hover:text-fg">
+          {children}
+        </Link>
+      </span>
+    );
+  }
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="flex-none text-fg-faint" aria-hidden>
+        /
+      </span>
+      <span className="min-w-0 truncate font-medium text-fg" aria-current="page">
+        {children}
+      </span>
+    </span>
   );
 }

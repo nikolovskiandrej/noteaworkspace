@@ -1,7 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Check, CircleAlert, FileCode, LoaderCircle, RotateCcw, Save, TriangleAlert } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { WorkspaceRequestError } from '@notea/workspace-client';
+import { cx } from './ui/cx';
 import { useWorkspaceSocket } from './workspace-socket';
 
 type EditorHandle = {
@@ -11,11 +13,11 @@ type EditorHandle = {
 };
 
 async function createEditor(parent: HTMLElement, path: string, initial: string, onChange: () => void, readOnly: boolean): Promise<EditorHandle> {
-  const [{ EditorView, basicSetup }, { EditorState, Compartment }, { keymap }, { oneDark }] = await Promise.all([
+  const [{ EditorView, basicSetup }, { EditorState, Compartment }, { keymap }, { noteaEditorTheme }] = await Promise.all([
     import('codemirror'),
     import('@codemirror/state'),
     import('@codemirror/view'),
-    import('@codemirror/theme-one-dark'),
+    import('./editor-theme'),
   ]);
   const language = await languageFor(path);
   const readOnlyCompartment = new Compartment();
@@ -25,7 +27,7 @@ async function createEditor(parent: HTMLElement, path: string, initial: string, 
       doc: initial,
       extensions: [
         basicSetup,
-        oneDark,
+        noteaEditorTheme,
         keymap.of([{ key: 'Mod-s', run: () => true }]), // handled at the document level
         ...(language ? [language] : []),
         readOnlyCompartment.of(EditorState.readOnly.of(readOnly)),
@@ -53,6 +55,45 @@ async function languageFor(path: string) {
   return null;
 }
 
+type EditorStatus = 'idle' | 'loading' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error';
+
+/** What the file's state means to the person editing it, next to its name. */
+function StatusNote({ status, readOnly }: { status: EditorStatus; readOnly: boolean }) {
+  if (readOnly && (status === 'idle' || status === 'saved')) return <span className="text-xs text-fg-subtle">Read only</span>;
+  switch (status) {
+    case 'loading':
+      return (
+        <span className="flex items-center gap-1.5 text-xs text-fg-subtle">
+          <LoaderCircle className="size-3 animate-spin" aria-hidden />
+          Opening
+        </span>
+      );
+    case 'dirty':
+      return (
+        <span className="flex items-center gap-1.5 text-xs text-warn">
+          <span className="size-1.5 rounded-full bg-warn" aria-hidden />
+          Unsaved changes
+        </span>
+      );
+    case 'saving':
+      return (
+        <span className="flex items-center gap-1.5 text-xs text-fg-subtle">
+          <LoaderCircle className="size-3 animate-spin" aria-hidden />
+          Saving
+        </span>
+      );
+    case 'saved':
+      return (
+        <span className="flex animate-enter items-center gap-1 text-xs text-accent">
+          <Check className="size-3.5" aria-hidden />
+          Saved
+        </span>
+      );
+    default:
+      return null;
+  }
+}
+
 export function Editor({ path, canWrite }: { path: string | null; canWrite: boolean }) {
   const { client, state } = useWorkspaceSocket();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -60,7 +101,7 @@ export function Editor({ path, canWrite }: { path: string | null; canWrite: bool
   const etagRef = useRef<string | null>(null);
   /** Bumped by every load and on teardown; only the latest load may touch the editor. */
   const loadSeqRef = useRef(0);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'>('idle');
+  const [status, setStatus] = useState<EditorStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -150,36 +191,82 @@ export function Editor({ path, canWrite }: { path: string | null; canWrite: bool
     return () => window.removeEventListener('keydown', onKey);
   }, [save]);
 
+  const segments = path ? path.split('/') : [];
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-3 border-b border-[#232830] bg-[#14171c] px-3 text-xs">
-        <span className="mono truncate text-[#c3c8d0]">{path ?? 'No file selected'}</span>
-        <span className="text-[#6f7782]">{status === 'idle' ? '' : status}</span>
-        {message ? <span className={status === 'conflict' ? 'text-amber-300' : 'text-rose-300'}>{message}</span> : null}
-        <div className="ml-auto flex items-center gap-2">
+    <div className="flex h-full flex-col bg-canvas">
+      <div className="pane-header gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          {path ? (
+            <p className="flex min-w-0 items-center gap-1 font-mono text-[12.5px]" title={path}>
+              {segments.map((segment, index) => (
+                <Fragment key={index}>
+                  {index > 0 ? (
+                    <span className="flex-none text-fg-faint" aria-hidden>
+                      /
+                    </span>
+                  ) : null}
+                  <span className={index === segments.length - 1 ? 'truncate text-fg' : 'hidden flex-none text-fg-subtle sm:inline'}>{segment}</span>
+                </Fragment>
+              ))}
+            </p>
+          ) : (
+            <span className="text-[12.5px] text-fg-subtle">No file open</span>
+          )}
+          {path ? <StatusNote status={status} readOnly={!canWrite} /> : null}
+        </div>
+        {path && canWrite ? (
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={status === 'saving' || status === 'loading'}
+            className={cx('btn btn-xs', status === 'dirty' ? 'btn-primary' : 'btn-secondary')}
+            title="Save (Ctrl+S)"
+          >
+            <Save aria-hidden />
+            Save
+          </button>
+        ) : null}
+      </div>
+      {message && (status === 'conflict' || status === 'error') ? (
+        <div
+          role="alert"
+          className={cx(
+            'flex flex-none animate-enter flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-3 py-2 text-xs',
+            status === 'conflict' ? 'border-warn/25 bg-warn/[0.06] text-[#ecd3a1]' : 'border-danger/25 bg-danger/[0.06] text-[#f3b1aa]',
+          )}
+        >
+          {status === 'conflict' ? <TriangleAlert className="size-3.5 flex-none text-warn" aria-hidden /> : <CircleAlert className="size-3.5 flex-none text-danger" aria-hidden />}
+          <span className="min-w-0 flex-1">{message}</span>
           {status === 'conflict' ? (
-            <>
-              <button onClick={() => void load()} className="rounded border border-[#2b313b] px-2 py-0.5 hover:bg-[#1c2027]">
-                Reload
+            <span className="flex flex-none gap-1.5">
+              <button type="button" onClick={() => void load()} className="btn btn-secondary btn-xs">
+                <RotateCcw aria-hidden />
+                Reload from disk
               </button>
-              <button onClick={() => void save(true)} className="rounded border border-amber-500/40 px-2 py-0.5 text-amber-300 hover:bg-amber-500/10">
+              <button type="button" onClick={() => void save(true)} className="btn btn-xs border-warn/40 text-warn hover:bg-warn/10">
                 Overwrite
               </button>
-            </>
-          ) : null}
-          {path && canWrite ? (
-            <button
-              onClick={() => void save()}
-              disabled={status === 'saving' || status === 'loading'}
-              className="rounded bg-emerald-500 px-2 py-0.5 font-medium text-black hover:bg-emerald-400 disabled:opacity-40"
-            >
-              Save
-            </button>
+            </span>
           ) : null}
         </div>
-      </div>
-      <div ref={containerRef} className="min-h-0 flex-1 overflow-hidden text-[13px]">
-        {!path ? <p className="p-4 text-sm text-[#6f7782]">Select a file in the tree to open it.</p> : null}
+      ) : null}
+      <div className="relative min-h-0 flex-1">
+        {/* CodeMirror owns this element's children; React never renders into it. */}
+        <div ref={containerRef} className="absolute inset-0 overflow-hidden text-[13px]" />
+        {!path ? (
+          <div className="absolute inset-0 grid place-items-center p-6">
+            <div className="max-w-xs text-center">
+              <span className="mx-auto grid size-10 place-items-center rounded-full border border-line bg-panel text-fg-subtle">
+                <FileCode className="size-[18px]" aria-hidden />
+              </span>
+              <p className="mt-3 text-[13px] font-medium text-fg">Open a file</p>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-fg-subtle">
+                Choose one in the file tree. <span className="kbd">Ctrl S</span> saves, and a change someone else saved first is flagged before you overwrite it.
+              </p>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -1,13 +1,13 @@
 # Notea Workspace — MVP Roadmap
 
-Last updated: 2026-09-15 (session 2).
+Last updated: 2026-09-15 (session 2); statuses corrected in session 11. The current, ordered next steps are in `HANDOFF.md` §24 and the verified state in `CURRENT_STATE.md`.
 
 | Milestone | Statement | Status |
 |---|---|---|
 | **M0 Foundation** | Protocol, workspace agent, base image, orchestrator; terminal driven end to end against a real container. | **done, tested** (session 1) |
 | **M1 Personal workspace** | Create a workspace in a browser, get a terminal, browse and edit files. | **done, tested, verified in Chrome** (session 2) |
-| **M2 Remote access + collaboration** | Reach the same workspace from another computer; two people simultaneously. | **partial**: membership, roles, shared terminals, presence, change notices done; deployment (compose/Caddy), rate limiting, invite links, watcher pending |
-| **M3 Agents in the workspace** | AI coding agents operate inside the workspace on tasks, in isolation, with review. | **done for the pipeline** (worktree runs, review, serialized integration, credentials) and **verified in Docker with the generic runtime**; real Claude Code run pending |
+| **M2 Remote access + collaboration** | Reach the same workspace from another computer; two people simultaneously. | **partial**: membership, roles, shared terminals, presence, change notices and sign-in rate limiting done; control plane deployed on Vercel, runtime host and its templates (`infra/deploy/`) not yet installed; invite links and watcher pending |
+| **M3 Agents in the workspace** | AI coding agents operate inside the workspace on tasks, in isolation, with review. | **done**: worktree runs, review, serialized integration, per-member credentials and uids; authenticated Claude Code runs end to end (sessions 7 and 8); Codex and Gemini await credentials |
 | **M4 Coordination extras** | Leases, approvals, cost accounting, agent roles. | leases + approvals + basic usage done; budgets, roles, richer policies pending |
 | **M5 Previews and deployment** | Port detection, preview proxy, deploy adapters. | not started |
 

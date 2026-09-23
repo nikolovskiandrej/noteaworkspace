@@ -1,8 +1,11 @@
-import Link from 'next/link';
+import { KeyRound, Plug, ShieldCheck, Unplug } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { AUTH_MODES, PROVIDERS } from '@notea/agents';
 import { auth } from '@/auth';
-import { TopBar } from '@/components/top-bar';
+import { Crumb, TopBar } from '@/components/top-bar';
+import { Field } from '@/components/ui/field';
+import { Notice } from '@/components/ui/notice';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { addCredentialAction, checkCredentialAction, deleteCredentialAction } from '@/lib/actions';
 import { connectionsFor, listCredentials } from '@/lib/credentials';
 import { getDb } from '@/lib/db';
@@ -10,8 +13,27 @@ import { env } from '@/lib/env';
 import { getOrchestrator } from '@/lib/orchestrator';
 import { listWorkspacesForUser } from '@/lib/workspaces';
 
-const CARD = 'rounded-lg border border-[#232830] bg-[#14171c]';
-const INPUT = 'rounded border border-[#2b313b] bg-[#0e1014] px-3 py-2';
+const PAGE = '/settings/ai';
+
+/**
+ * Password managers treat any form with a password field as a sign-in form and fill in
+ * the Notea login. These attributes ask Chrome and the common extensions to leave the
+ * token field alone.
+ */
+const NOT_A_LOGIN = { 'data-1p-ignore': true, 'data-lpignore': 'true', 'data-bwignore': 'true', 'data-form-type': 'other' } as const;
+
+/** The provider help texts mark commands with backticks; show those as code. */
+function withCode(text: string) {
+  return text.split('`').map((part, index) =>
+    index % 2 === 1 ? (
+      <code key={index} className="kbd">
+        {part}
+      </code>
+    ) : (
+      part
+    ),
+  );
+}
 
 export default async function AiSettingsPage({ searchParams }: { searchParams: Promise<{ error?: string; checked?: string; ok?: string }> }) {
   const session = await auth();
@@ -24,143 +46,168 @@ export default async function AiSettingsPage({ searchParams }: { searchParams: P
   const connections = connectionsFor(credentials);
   const workspaces = await listWorkspacesForUser({ db, orchestrator: getOrchestrator() }, session.user.id);
   const runnable = workspaces.filter((w) => w.status === 'running' && w.role !== 'viewer');
+  const authModeIds = [...new Set(Object.values(AUTH_MODES).flat().map((m) => m.id))];
 
   return (
-    <div className="flex h-full flex-col">
-      <TopBar userName={session.user.name ?? 'you'}>
-        <Link href="/" className="text-[#6f7782] hover:text-[#c3c8d0]">
-          Workspaces
-        </Link>
-        <span className="text-[#3a404a]">/</span>
-        <span className="font-medium text-[#e6e9ee]">AI &amp; Claude</span>
+    <div className="flex min-h-full flex-col">
+      <TopBar userName={session.user.name ?? 'you'} userEmail={session.user.email}>
+        <Crumb href="/">Workspaces</Crumb>
+        <Crumb>AI &amp; Claude</Crumb>
       </TopBar>
 
-      <main className="mx-auto w-full max-w-3xl flex-1 space-y-6 overflow-y-auto p-6 text-sm">
-        {error ? <p className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-300">{error}</p> : null}
-        {checked ? (
-          <p className={`rounded border px-3 py-2 ${ok === '1' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'}`}>
-            {checked}
+      <main className="page-enter mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:px-6 sm:py-12">
+        <header>
+          <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-fg">Your AI connections</h1>
+          <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-fg-muted">
+            These belong to <span className="text-fg">{session.user.email ?? session.user.name}</span> and to nobody else. Agent tasks you create run as your
+            own Unix user inside the workspace container and are the only processes that ever receive them. Another member&apos;s shell, and another
+            member&apos;s agent, cannot read them.
           </p>
-        ) : null}
+        </header>
 
-        <section className="space-y-1">
-          <h1 className="text-base font-medium text-[#e6e9ee]">Your AI connections</h1>
-          <p className="text-[#9aa1ab]">
-            These belong to <span className="text-[#e6e9ee]">{session.user.email ?? session.user.name}</span> and to nobody else. Agent tasks you
-            create run as your own Unix user inside the workspace container and are the only processes that ever receive them — another member&apos;s
-            shell, and another member&apos;s agent, cannot read them.
-          </p>
-        </section>
+        <div className="mt-6 space-y-3 empty:hidden">
+          {error ? (
+            <Notice tone="danger" dismissHref={PAGE}>
+              {error}
+            </Notice>
+          ) : null}
+          {checked ? (
+            <Notice tone={ok === '1' ? 'success' : 'warn'} dismissHref={PAGE}>
+              {checked}
+            </Notice>
+          ) : null}
+          {!key ? (
+            <Notice tone="warn">
+              CREDENTIALS_KEY is not configured on the web app, so connections cannot be stored. Generate one with{' '}
+              <code className="kbd">openssl rand -hex 32</code> and set the same value for the web app and the worker.
+            </Notice>
+          ) : null}
+        </div>
 
-        {!key ? (
-          <p className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-300">
-            CREDENTIALS_KEY is not configured on the web app, so connections cannot be stored. Generate one with{' '}
-            <code className="mono">openssl rand -hex 32</code> and set the same value for the web app and the worker.
-          </p>
-        ) : null}
+        <div className="mt-8 space-y-4">
+          {connections.map((connection) => (
+            <section key={connection.provider} aria-labelledby={`provider-${connection.provider}`} className="overflow-hidden rounded-lg border border-line bg-panel">
+              <header className="flex items-center gap-3 px-4 py-3">
+                <h2 id={`provider-${connection.provider}`} className="text-[14px] font-semibold text-fg">
+                  {connection.providerName}
+                </h2>
+                <span className={connection.connected ? 'status tone-live' : 'status tone-muted'}>
+                  <span className="status-dot" data-hollow={connection.connected ? undefined : ''} aria-hidden />
+                  {connection.connected ? 'Connected' : 'Not connected'}
+                </span>
+              </header>
 
-        {connections.map((connection) => (
-          <section key={connection.provider} className={`${CARD} p-4`}>
-            <header className="flex items-center gap-2">
-              <h2 className="text-[#e6e9ee]">{connection.providerName}</h2>
-              <span className={connection.connected ? 'text-emerald-400' : 'text-[#6f7782]'}>
-                {connection.connected ? '● Connected' : '○ Not connected'}
-              </span>
-            </header>
-
-            {connection.mixed ? (
-              <p className="mt-2 text-xs text-amber-300">
-                You have both a subscription and an API connection here. Each task uses exactly one — whichever you pick when you create it.
-              </p>
-            ) : null}
-
-            <ul className="mt-3 divide-y divide-[#232830] border-y border-[#232830]">
-              {connection.credentials.length === 0 ? (
-                <li className="py-3 text-[#6f7782]">Nothing connected yet.</li>
-              ) : null}
-              {connection.credentials.map((c) => (
-                <li key={c.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3">
-                  <span className="min-w-40 flex-1 text-[#e6e9ee]">{c.label}</span>
-                  <span className="text-[#9aa1ab]">
-                    Authentication: <span className="text-[#e6e9ee]">{c.authLabel}</span>
-                  </span>
-                  <span className={c.apiBilled ? 'text-amber-300' : 'text-emerald-300'}>
-                    {c.apiBilled ? 'API billing: pay-as-you-go' : 'API billing: not used'}
-                  </span>
-                  <span className="mono text-xs text-[#6f7782]" title={`injected as ${c.env}`}>
-                    {c.masked}
-                  </span>
-                  {runnable.length > 0 ? (
-                    <form action={checkCredentialAction} className="flex items-center gap-1">
-                      <input type="hidden" name="credentialId" value={c.id} />
-                      <select name="workspaceId" className="rounded border border-[#2b313b] bg-[#0e1014] px-2 py-0.5 text-xs">
-                        {runnable.map((w) => (
-                          <option key={w.workspace.id} value={w.workspace.id}>
-                            {w.workspace.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button className="rounded border border-[#2b313b] px-2 py-0.5 text-xs text-[#c3c8d0] hover:bg-[#1c2027]">Check</button>
-                    </form>
-                  ) : null}
-                  <form action={deleteCredentialAction}>
-                    <input type="hidden" name="credentialId" value={c.id} />
-                    <button className="rounded border border-rose-500/30 px-2 py-0.5 text-xs text-rose-300 hover:bg-rose-500/10">Disconnect</button>
-                  </form>
-                </li>
-              ))}
-            </ul>
-
-            <div className="mt-3 space-y-1 text-xs text-[#6f7782]">
-              {AUTH_MODES[connection.provider].map((mode) => (
-                <p key={mode.id}>
-                  <span className="text-[#9aa1ab]">{mode.label}:</span> {mode.obtain} <span className="text-[#4e555f]">({mode.billing})</span>
+              {connection.mixed ? (
+                <p className="mx-4 mb-3 rounded-md border border-warn/25 bg-warn/[0.06] px-3 py-2 text-xs leading-relaxed text-[#ecd3a1]">
+                  You have both a subscription and an API connection here. Each task uses exactly one: whichever you pick when you create it.
                 </p>
-              ))}
-            </div>
-          </section>
-        ))}
+              ) : null}
 
-        <form action={addCredentialAction} className={`${CARD} flex flex-wrap items-end gap-3 p-4`}>
-          <h2 className="w-full text-[#e6e9ee]">Connect an account</h2>
-          <label>
-            <span className="mb-1 block text-[#9aa1ab]">Provider</span>
-            <select name="provider" className={INPUT}>
-              {Object.values(PROVIDERS).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span className="mb-1 block text-[#9aa1ab]">Authentication</span>
-            <select name="authMode" className={INPUT}>
-              {[...new Set(Object.values(AUTH_MODES).flat().map((m) => m.id))].map((id) => {
-                const mode = Object.values(AUTH_MODES).flat().find((m) => m.id === id)!;
-                return (
-                  <option key={id} value={id}>
-                    {mode.label.replace(/^Claude /, '').replace(/^Anthropic /, '')} — {id === 'subscription' ? 'no API charges' : 'API billing'}
+              <ul className="divide-y divide-line border-y border-line">
+                {connection.credentials.length === 0 ? <li className="px-4 py-3 text-[13px] text-fg-subtle">Nothing connected yet.</li> : null}
+                {connection.credentials.map((c) => (
+                  <li key={c.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3">
+                    <div className="min-w-48 flex-1">
+                      <p className="text-[13px] font-medium text-fg">{c.label}</p>
+                      <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-subtle">
+                        <span className="text-fg-muted">{c.authLabel}</span>
+                        <span className={c.apiBilled ? 'text-warn' : 'text-accent'}>{c.apiBilled ? 'Pay-as-you-go API billing' : 'No API charges'}</span>
+                        <span className="font-mono" title={`Injected as ${c.env}`}>
+                          {c.masked}
+                        </span>
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {runnable.length > 0 ? (
+                        <form action={checkCredentialAction} className="flex items-center gap-1.5">
+                          <input type="hidden" name="credentialId" value={c.id} />
+                          <select name="workspaceId" aria-label="Workspace to check in" className="input input-sm w-auto max-w-44">
+                            {runnable.map((w) => (
+                              <option key={w.workspace.id} value={w.workspace.id}>
+                                {w.workspace.name}
+                              </option>
+                            ))}
+                          </select>
+                          <SubmitButton className="btn-secondary btn-sm" icon={<ShieldCheck aria-hidden />} pendingLabel="Checking…" title="Ask the CLI, as your own uid in a real container, how it authenticates">
+                            Check
+                          </SubmitButton>
+                        </form>
+                      ) : null}
+                      <form action={deleteCredentialAction}>
+                        <input type="hidden" name="credentialId" value={c.id} />
+                        <SubmitButton className="btn-danger btn-sm" icon={<Unplug aria-hidden />} pendingLabel="Disconnecting…">
+                          Disconnect
+                        </SubmitButton>
+                      </form>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="space-y-1.5 bg-canvas/40 px-4 py-3 text-xs leading-relaxed text-fg-subtle">
+                {AUTH_MODES[connection.provider].map((mode) => (
+                  <p key={mode.id}>
+                    <span className="font-medium text-fg-muted">{mode.label}:</span> {withCode(mode.obtain)}{' '}
+                    <span className="text-fg-faint">({mode.billing})</span>
+                  </p>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+
+        <form action={addCredentialAction} autoComplete="off" className="mt-8 rounded-lg border border-line bg-panel p-4 sm:p-5">
+          <div className="flex items-center gap-2.5">
+            <KeyRound className="size-4 text-fg-subtle" aria-hidden />
+            <h2 className="text-[14px] font-semibold text-fg">Connect an account</h2>
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field label="Provider" htmlFor="credential-provider">
+              <select id="credential-provider" name="provider" className="input">
+                {Object.values(PROVIDERS).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
                   </option>
-                );
-              })}
-            </select>
-          </label>
-          <label>
-            <span className="mb-1 block text-[#9aa1ab]">Label</span>
-            <input name="label" required maxLength={80} placeholder="my Claude account" className={INPUT} />
-          </label>
-          <label className="flex-1">
-            <span className="mb-1 block text-[#9aa1ab]">Token or key</span>
-            <input name="secret" type="password" required autoComplete="off" className={`mono w-full ${INPUT}`} />
-          </label>
-          <button disabled={!key} className="rounded bg-emerald-500 px-3 py-2 font-medium text-black hover:bg-emerald-400 disabled:opacity-40">
-            Connect
-          </button>
-          <p className="w-full text-xs text-[#6f7782]">
-            Stored encrypted (AES-256-GCM) and never shown again. Notea sets exactly one credential variable per run and clears the others, so a
-            subscription connection cannot quietly fall back to metered API usage.
-          </p>
+                ))}
+              </select>
+            </Field>
+            <Field label="Authentication" htmlFor="credential-mode">
+              <select id="credential-mode" name="authMode" className="input">
+                {authModeIds.map((modeId) => {
+                  const mode = Object.values(AUTH_MODES).flat().find((m) => m.id === modeId)!;
+                  return (
+                    <option key={modeId} value={modeId}>
+                      {mode.label.replace(/^Claude /, '').replace(/^Anthropic /, '')} ({modeId === 'subscription' ? 'no API charges' : 'API billing'})
+                    </option>
+                  );
+                })}
+              </select>
+            </Field>
+            <Field label="Label" htmlFor="credential-label">
+              <input id="credential-label" name="label" required maxLength={80} placeholder="My Claude account" autoComplete="off" {...NOT_A_LOGIN} className="input" />
+            </Field>
+            <Field label="Token or key" htmlFor="credential-secret">
+              <input
+                id="credential-secret"
+                name="secret"
+                type="password"
+                required
+                autoComplete="new-password"
+                spellCheck={false}
+                {...NOT_A_LOGIN}
+                className="input font-mono"
+              />
+            </Field>
+          </div>
+          <div className="mt-5 flex flex-wrap items-end justify-between gap-4">
+            <p className="max-w-md text-xs leading-relaxed text-fg-subtle">
+              Stored encrypted (AES-256-GCM) and never shown again. Notea sets exactly one credential variable per run and clears the others, so a subscription
+              connection cannot quietly fall back to metered API usage.
+            </p>
+            <SubmitButton disabled={!key} className="btn-primary" icon={<Plug aria-hidden />} pendingLabel="Connecting…">
+              Connect
+            </SubmitButton>
+          </div>
         </form>
       </main>
     </div>

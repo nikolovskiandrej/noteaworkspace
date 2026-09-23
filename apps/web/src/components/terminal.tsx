@@ -4,6 +4,48 @@ import { useEffect, useRef } from 'react';
 import type { WorkspaceClient } from '@notea/workspace-client';
 import '@xterm/xterm/css/xterm.css';
 
+/** The terminal in the workspace palette: the canvas behind, mint cursor, muted ANSI colours. */
+const THEME = {
+  background: '#090b0a',
+  foreground: '#d9dcd3',
+  cursor: '#7cc4a0',
+  cursorAccent: '#090b0a',
+  selectionBackground: 'rgba(124, 196, 160, 0.26)',
+  black: '#1a1f1c',
+  red: '#ec7c73',
+  green: '#7cc4a0',
+  yellow: '#dcae5a',
+  blue: '#8fb4e6',
+  magenta: '#ad9df3',
+  cyan: '#7fc2c2',
+  white: '#d9dcd3',
+  brightBlack: '#5b635d',
+  brightRed: '#f29a92',
+  brightGreen: '#9ed8b9',
+  brightYellow: '#e8c47e',
+  brightBlue: '#abc8ef',
+  brightMagenta: '#c5b9f7',
+  brightCyan: '#a0d8d8',
+  brightWhite: '#f4f5ef',
+};
+
+/**
+ * xterm measures its character cell once, when it opens, so it has to measure the
+ * font it will draw with. Waits for the self-hosted mono font (at most 1.5 s, then
+ * carries on with whatever is available).
+ */
+async function monoFontReady(): Promise<void> {
+  if (typeof document === 'undefined' || !('fonts' in document)) return;
+  try {
+    await Promise.race([
+      Promise.all([document.fonts.load('13px "IBM Plex Mono"'), document.fonts.load('600 13px "IBM Plex Mono"')]),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ]);
+  } catch {
+    // A font that fails to load is not a reason to have no terminal.
+  }
+}
+
 /**
  * One xterm.js instance attached to one agent session. Mounting attaches (and
  * replays scrollback); unmounting detaches. On every new `hello` (reconnect) it
@@ -21,14 +63,16 @@ export function Terminal({ client, sessionId, canInput }: { client: WorkspaceCli
     const cleanups: Array<() => void> = [];
 
     void (async () => {
-      const [{ Terminal: XTerm }, { FitAddon }] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
+      const [{ Terminal: XTerm }, { FitAddon }] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit'), monoFontReady()]);
       if (disposed) return;
       const term = new XTerm({
         cursorBlink: true,
         fontSize: 13,
-        fontFamily: 'ui-monospace, "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace',
+        lineHeight: 1.2,
+        fontFamily: '"IBM Plex Mono", ui-monospace, "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace',
+        fontWeightBold: 600,
         scrollback: 5000,
-        theme: { background: '#0e1014', foreground: '#d7dae0', cursor: '#6ee7b7' },
+        theme: THEME,
       });
       const fit = new FitAddon();
       term.loadAddon(fit);
@@ -66,7 +110,12 @@ export function Terminal({ client, sessionId, canInput }: { client: WorkspaceCli
       });
       observer.observe(container);
       cleanups.push(() => observer.disconnect());
-      term.focus();
+      // Take the keyboard only if nothing else has it, or it is already in the terminal
+      // panel (a tab or "New terminal" was just clicked). Attaching is asynchronous, and a
+      // terminal that finishes while someone is typing in the editor must not send the
+      // rest of their keystrokes to a shell.
+      const active = document.activeElement;
+      if (!active || active === document.body || active.closest('[data-terminal-panel]')) term.focus();
     })();
 
     return () => {

@@ -2,6 +2,8 @@
 
 Last updated: 2026-09-15 (session 2). Ordered steps for the next implementing agent.
 
+> **Status (session 11).** This plan predates sessions 3–11 and is kept for its reasoning. Done since: Step 1 (authenticated Claude Code runs and their fixtures, sessions 7–8), sign-in rate limiting from Step 4, and Step 5's deployment templates (`infra/deploy/`, `DEPLOYMENT.md`; the control plane is live, the runtime host is not). Runs are no longer `agent:` terminals (D-039); follow them in the task's run log. The current, ordered next steps are in `HANDOFF.md` §24.
+
 ## Conventions
 TypeScript strict; zod at trust boundaries; tests beside code in `test/`; packages export TS source; protocol changes are additive within v1.x (schema + type + test together); `npm run typecheck && npm test` (with `DATABASE_URL`) before every commit; keep `docs/CURRENT_STATE.md` accurate.
 

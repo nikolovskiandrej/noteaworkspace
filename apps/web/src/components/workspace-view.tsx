@@ -1,12 +1,19 @@
 'use client';
 
+import { Code, FolderTree, ListChecks, Play, Power, UserPlus, WifiOff, X } from 'lucide-react';
+import { AnimatePresence, m } from 'motion/react';
 import { useState } from 'react';
 import type { WorkspaceRole } from '@notea/protocol';
-import { addMemberAction, removeMemberAction } from '@/lib/actions';
+import { addMemberAction, removeMemberAction, startWorkspaceAction } from '@/lib/actions';
+import { describeEvent, formatEventTime, type ActivityEvent, type ActivityTone } from '@/lib/activity';
 import { Editor } from './editor';
 import { FileTree } from './file-tree';
 import { TasksPanel, type TasksPanelProps } from './tasks-panel';
 import { TerminalPanel } from './terminal-panel';
+import { Avatar } from './ui/avatar';
+import { cx } from './ui/cx';
+import { SegmentedTabs } from './ui/segmented-tabs';
+import { SubmitButton } from './ui/submit-button';
 import { useWorkspaceSocket, WorkspaceSocketProvider } from './workspace-socket';
 
 export interface WorkspaceViewProps {
@@ -15,26 +22,51 @@ export interface WorkspaceViewProps {
   role: WorkspaceRole;
   running: boolean;
   members: Array<{ userId: string; email: string; name: string; role: WorkspaceRole }>;
-  events: Array<{ id: number; type: string; actorKind: string; createdAt: string; payload: Record<string, unknown> }>;
+  events: ActivityEvent[];
   currentUserId: string;
   returnTo: string;
   tasks: TasksPanelProps;
 }
 
-/** Deterministic (UTC, fixed locale) so server and client render identical markup. */
-function formatTimestamp(iso: string): string {
-  return new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(iso)) + ' UTC';
-}
+const ROLE_LABEL: Record<WorkspaceRole, string> = { owner: 'Owner', editor: 'Editor', viewer: 'Viewer' };
 
 export function WorkspaceView(props: WorkspaceViewProps) {
   if (!props.running) {
+    const canStart = props.role !== 'viewer';
     return (
-      <div className="flex min-h-0 flex-1">
-        <main className="flex flex-1 items-center justify-center p-6 text-sm text-[#9aa1ab]">
-          This workspace is not running. {props.role !== 'viewer' ? 'Start it from the top bar.' : 'Ask an editor or the owner to start it.'}
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <main className="flex flex-1 items-center justify-center px-6 py-12">
+          <div className="page-enter max-w-sm text-center">
+            <span className="mx-auto grid size-11 place-items-center rounded-full border border-line-strong bg-raised text-fg-subtle">
+              <Power className="size-[18px]" aria-hidden />
+            </span>
+            <h2 className="mt-4 text-[15px] font-semibold tracking-[-0.01em] text-fg">This workspace is not running</h2>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-fg-muted">
+              {canStart
+                ? 'Start it to open its files and terminals. Files, history and task branches are kept while it is stopped.'
+                : 'Ask an editor or the owner to start it. Its tasks are listed alongside.'}
+            </p>
+            {canStart ? (
+              <form action={startWorkspaceAction} className="mt-5">
+                <input type="hidden" name="workspaceId" value={props.workspaceId} />
+                <input type="hidden" name="returnTo" value={props.returnTo} />
+                <SubmitButton className="btn-primary" icon={<Play aria-hidden />} pendingLabel="Starting…">
+                  Start workspace
+                </SubmitButton>
+              </form>
+            ) : null}
+          </div>
         </main>
-        <aside className="w-80 shrink-0 border-l border-[#232830] bg-[#111418]">
-          <TasksPanel {...props.tasks} />
+        <aside
+          aria-label="Tasks"
+          className="flex min-h-0 flex-col border-t border-line bg-panel max-lg:flex-1 lg:w-80 lg:flex-none lg:border-l lg:border-t-0 xl:w-[22rem]"
+        >
+          <div className="pane-header">
+            <h2 className="pane-title">Tasks</h2>
+          </div>
+          <div className="min-h-0 flex-1">
+            <TasksPanel {...props.tasks} />
+          </div>
         </aside>
       </div>
     );
@@ -46,121 +78,288 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   );
 }
 
+type MobileView = 'files' | 'code' | 'panel';
+type PanelTab = 'tasks' | 'people' | 'activity';
+
 function WorkspaceLayout({ workspaceId, role, members, events, currentUserId, returnTo, tasks }: WorkspaceViewProps) {
   const { state, presence, lastClose } = useWorkspaceSocket();
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [tab, setTab] = useState<'tasks' | 'people' | 'activity'>('tasks');
+  const [tab, setTab] = useState<PanelTab>('tasks');
+  // Below the `lg` breakpoint one pane is shown at a time; every pane stays mounted so
+  // the editor keeps its unsaved text and the terminals keep their sessions.
+  const [view, setView] = useState<MobileView>('code');
   const canWrite = role !== 'viewer';
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <aside className="w-60 shrink-0 border-r border-[#232830] bg-[#111418]">
-        <FileTree selectedPath={selectedPath} onSelect={setSelectedPath} />
-      </aside>
-      <section className="flex min-w-0 flex-1 flex-col">
-        {state !== 'open' ? (
-          <p className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-300">
-            {state === 'closed' ? `Disconnected${lastClose?.reason ? `: ${lastClose.reason}` : ''}. Reload the page.` : `Connecting to the workspace… (${state})`}
-          </p>
-        ) : null}
-        <div className="min-h-0 flex-[3] border-b border-[#232830]">
-          <Editor path={selectedPath} canWrite={canWrite} />
-        </div>
-        <div className="min-h-0 flex-[2]">
-          <TerminalPanel canInput={canWrite} />
-        </div>
-      </section>
-      <aside className="flex w-80 shrink-0 flex-col border-l border-[#232830] bg-[#111418] text-xs">
-        <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[#232830] px-2">
-          {(['tasks', 'people', 'activity'] as const).map((name) => (
-            <button
-              key={name}
-              onClick={() => setTab(name)}
-              className={`rounded px-2 py-1 capitalize ${tab === name ? 'bg-[#232830] text-[#e6e9ee]' : 'text-[#9aa1ab] hover:bg-[#1c2027]'}`}
-            >
-              {name}
-              {name === 'people' ? <span className="ml-1 text-[#6f7782]">{presence.length}</span> : null}
-            </button>
-          ))}
-        </div>
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {tab === 'tasks' ? <TasksPanel {...tasks} /> : null}
-          {tab === 'people' ? (
-            <div className="space-y-4 p-3">
-              <div>
-                <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#9aa1ab]">Here now</h3>
-                <ul className="space-y-1">
-                  {presence.length === 0 ? <li className="text-[#6f7782]">Nobody connected</li> : null}
-                  {presence.map((p) => (
-                    <li key={p.id} className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${p.kind === 'agent' ? 'bg-violet-400' : 'bg-emerald-400'}`} />
-                      <span className="text-[#e6e9ee]">{p.name}</span>
-                      <span className="text-[#6f7782]">{p.role}</span>
-                      {p.attachedSessionIds.length > 0 ? <span className="text-[#6f7782]">· {p.attachedSessionIds.length} term</span> : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#9aa1ab]">Members</h3>
-                <ul className="space-y-1">
-                  {members.map((m) => (
-                    <li key={m.userId} className="flex items-center gap-2">
-                      <span className="truncate text-[#e6e9ee]" title={m.email}>
-                        {m.name}
-                      </span>
-                      <span className="text-[#6f7782]">{m.role}</span>
-                      {role === 'owner' && m.role !== 'owner' ? (
-                        <form action={removeMemberAction} className="ml-auto">
-                          <input type="hidden" name="workspaceId" value={workspaceId} />
-                          <input type="hidden" name="userId" value={m.userId} />
-                          <input type="hidden" name="returnTo" value={returnTo} />
-                          <button className="text-[#6f7782] hover:text-rose-300" title="Remove member">
-                            ×
-                          </button>
-                        </form>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-                {role === 'owner' ? (
-                  <form action={addMemberAction} className="mt-2 flex flex-col gap-1">
-                    <input type="hidden" name="workspaceId" value={workspaceId} />
-                    <input type="hidden" name="returnTo" value={returnTo} />
-                    <input
-                      name="email"
-                      type="email"
-                      required
-                      placeholder="collaborator@example.com"
-                      className="rounded border border-[#2b313b] bg-[#0e1014] px-2 py-1 outline-none focus:border-emerald-500/60"
-                    />
-                    <div className="flex gap-1">
-                      <select name="role" className="flex-1 rounded border border-[#2b313b] bg-[#0e1014] px-2 py-1">
-                        <option value="editor">editor</option>
-                        <option value="viewer">viewer</option>
-                      </select>
-                      <button className="rounded border border-emerald-500/40 px-2 py-1 text-emerald-300 hover:bg-emerald-500/10">Add</button>
-                    </div>
-                  </form>
-                ) : null}
-              </div>
-              <p className="text-[10px] text-[#6f7782]">you: {members.find((m) => m.userId === currentUserId)?.name ?? 'unknown'} ({role})</p>
-            </div>
-          ) : null}
-          {tab === 'activity' ? (
-            <ul className="h-full space-y-1.5 overflow-auto p-3">
-              {events.map((event) => (
-                <li key={event.id} className="text-[#aab1bb]">
-                  <span className="text-[#e6e9ee]">{event.type}</span>
-                  <span className="block text-[10px] text-[#6f7782]">
-                    {event.actorKind} · {formatTimestamp(event.createdAt)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      </aside>
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <ConnectionStatus state={state} reason={lastClose?.reason} />
+      <div className="flex-none border-b border-line bg-panel px-2 py-1.5 lg:hidden">
+        <SegmentedTabs
+          label="Workspace pane"
+          idPrefix="workspace-view"
+          value={view}
+          onChange={setView}
+          tabs={[
+            { id: 'files', label: 'Files', icon: <FolderTree className="size-3.5" aria-hidden /> },
+            { id: 'code', label: 'Code', icon: <Code className="size-3.5" aria-hidden /> },
+            { id: 'panel', label: 'Tasks', icon: <ListChecks className="size-3.5" aria-hidden />, count: tasks.tasks.length },
+          ]}
+        />
+      </div>
+      <div id="workspace-view-panel" className="flex min-h-0 flex-1">
+        <aside
+          aria-label="Files"
+          className={cx(
+            'min-h-0 min-w-0 flex-col bg-panel lg:flex lg:w-60 lg:flex-none lg:border-r lg:border-line xl:w-64',
+            view === 'files' ? 'flex flex-1' : 'hidden',
+          )}
+        >
+          <FileTree
+            selectedPath={selectedPath}
+            onSelect={(path) => {
+              setSelectedPath(path);
+              setView('code');
+            }}
+          />
+        </aside>
+        <section aria-label="Editor and terminals" className={cx('min-h-0 min-w-0 flex-1 flex-col lg:flex', view === 'code' ? 'flex' : 'hidden')}>
+          <div className="min-h-0 flex-[3] border-b border-line">
+            <Editor path={selectedPath} canWrite={canWrite} />
+          </div>
+          <div className="min-h-0 flex-[2]">
+            <TerminalPanel canInput={canWrite} />
+          </div>
+        </section>
+        <aside
+          aria-label="Tasks, people and activity"
+          className={cx(
+            'min-h-0 min-w-0 flex-col bg-panel lg:flex lg:w-80 lg:flex-none lg:border-l lg:border-line xl:w-[22rem]',
+            view === 'panel' ? 'flex flex-1' : 'hidden',
+          )}
+        >
+          <div className="flex-none border-b border-line px-2 py-1.5">
+            <SegmentedTabs
+              label="Workspace panel"
+              idPrefix="workspace-panel"
+              value={tab}
+              onChange={setTab}
+              tabs={[
+                { id: 'tasks', label: 'Tasks', count: tasks.tasks.length },
+                { id: 'people', label: 'People', count: presence.length },
+                { id: 'activity', label: 'Activity' },
+              ]}
+            />
+          </div>
+          <m.div
+            key={tab}
+            id="workspace-panel-panel"
+            role="tabpanel"
+            aria-labelledby={`workspace-panel-tab-${tab}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+            className="min-h-0 flex-1 overflow-hidden"
+          >
+            {tab === 'tasks' ? <TasksPanel {...tasks} /> : null}
+            {tab === 'people' ? (
+              <PeoplePanel workspaceId={workspaceId} role={role} members={members} currentUserId={currentUserId} returnTo={returnTo} />
+            ) : null}
+            {tab === 'activity' ? <ActivityPanel events={events} currentUserId={currentUserId} members={members} tasks={tasks.tasks} /> : null}
+          </m.div>
+        </aside>
+      </div>
     </div>
+  );
+}
+
+/**
+ * The workspace connection's state, as a pill floating over the panes rather than a
+ * banner that pushes them down. It fades in late, so a quick first connect never
+ * shows it at all.
+ */
+function ConnectionStatus({ state, reason }: { state: string; reason?: string }) {
+  const closed = state === 'closed';
+  return (
+    <AnimatePresence>
+      {state !== 'open' ? (
+        <m.div
+          key="connection"
+          role="status"
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0, transition: { delay: 0.4, duration: 0.24, ease: [0.16, 1, 0.3, 1] } }}
+          exit={{ opacity: 0, y: -6, transition: { duration: 0.16 } }}
+          className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center px-3"
+        >
+          <span
+            className={cx(
+              'pointer-events-auto flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-[0_12px_32px_-12px_rgb(0_0_0/0.9)]',
+              closed ? 'border-danger/30 bg-[#1b1110] text-[#f3b1aa]' : 'border-warn/30 bg-[#1a160d] text-[#ecd3a1]',
+            )}
+          >
+            {closed ? (
+              <WifiOff className="size-3.5 flex-none" aria-hidden />
+            ) : (
+              <span className="status-dot tone-warn" data-pulse="" aria-hidden />
+            )}
+            <span className="truncate">
+              {closed
+                ? `Disconnected${reason ? `: ${reason}` : ''}. Reload the page to reconnect.`
+                : state === 'reconnecting'
+                  ? 'Connection lost. Reconnecting…'
+                  : 'Connecting to the workspace…'}
+            </span>
+          </span>
+        </m.div>
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+function PeoplePanel({
+  workspaceId,
+  role,
+  members,
+  currentUserId,
+  returnTo,
+}: {
+  workspaceId: string;
+  role: WorkspaceRole;
+  members: WorkspaceViewProps['members'];
+  currentUserId: string;
+  returnTo: string;
+}) {
+  const { presence } = useWorkspaceSocket();
+  return (
+    <div className="h-full space-y-6 overflow-y-auto px-3 py-4">
+      <section>
+        <h3 className="px-1 text-xs font-medium text-fg-subtle">Here now</h3>
+        <ul className="mt-2 space-y-0.5">
+          {presence.length === 0 ? <li className="px-1 text-[13px] text-fg-subtle">Nobody is connected.</li> : null}
+          {presence.map((client) => (
+            <li key={client.id} className="flex items-center gap-2.5 rounded-md px-1 py-1.5">
+              <span className="relative">
+                <Avatar name={client.name} kind={client.kind === 'agent' ? 'agent' : 'user'} />
+                <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-accent ring-2 ring-panel" aria-hidden />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] text-fg">
+                  {client.name}
+                  {client.userId === currentUserId ? <span className="text-fg-subtle"> (you)</span> : null}
+                </p>
+                <p className="text-xs text-fg-subtle">
+                  {client.kind === 'agent' ? 'Agent' : ROLE_LABEL[client.role]}
+                  {client.attachedSessionIds.length > 0
+                    ? `, watching ${client.attachedSessionIds.length} terminal${client.attachedSessionIds.length === 1 ? '' : 's'}`
+                    : ''}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section>
+        <h3 className="px-1 text-xs font-medium text-fg-subtle">Members</h3>
+        <ul className="mt-2 space-y-0.5">
+          {members.map((member) => (
+            <li key={member.userId} className="group flex items-center gap-2.5 rounded-md px-1 py-1.5">
+              <Avatar name={member.name} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] text-fg">
+                  {member.name}
+                  {member.userId === currentUserId ? <span className="text-fg-subtle"> (you)</span> : null}
+                </p>
+                <p className="truncate text-xs text-fg-subtle">{member.email}</p>
+              </div>
+              <span className="flex-none text-xs text-fg-muted">{ROLE_LABEL[member.role]}</span>
+              {role === 'owner' && member.role !== 'owner' ? (
+                <form action={removeMemberAction} className="flex-none">
+                  <input type="hidden" name="workspaceId" value={workspaceId} />
+                  <input type="hidden" name="userId" value={member.userId} />
+                  <input type="hidden" name="returnTo" value={returnTo} />
+                  <SubmitButton className="btn-ghost btn-icon btn-xs hover:text-danger" aria-label={`Remove ${member.name}`} title={`Remove ${member.name}`}>
+                    <X aria-hidden />
+                  </SubmitButton>
+                </form>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+        {role === 'owner' ? (
+          <form action={addMemberAction} className="mt-4 rounded-lg border border-line bg-canvas/60 p-3">
+            <input type="hidden" name="workspaceId" value={workspaceId} />
+            <input type="hidden" name="returnTo" value={returnTo} />
+            <label htmlFor="member-email" className="field-label">
+              Add a member
+            </label>
+            <input
+              id="member-email"
+              name="email"
+              type="email"
+              required
+              placeholder="colleague@example.com"
+              autoComplete="off"
+              className="input input-sm"
+            />
+            <div className="mt-2 flex gap-2">
+              <select name="role" aria-label="Role" defaultValue="editor" className="input input-sm flex-1">
+                <option value="editor">Editor: can edit and run tasks</option>
+                <option value="viewer">Viewer: read only</option>
+              </select>
+              <SubmitButton className="btn-secondary btn-sm" icon={<UserPlus aria-hidden />}>
+                Add
+              </SubmitButton>
+            </div>
+            <p className="field-hint">They need an account already; there are no invitations yet.</p>
+          </form>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+const TONE_DOT: Record<ActivityTone, string> = {
+  neutral: 'bg-fg-faint',
+  agent: 'bg-agent',
+  ok: 'bg-accent',
+  danger: 'bg-danger',
+};
+
+function ActivityPanel({
+  events,
+  currentUserId,
+  members,
+  tasks,
+}: {
+  events: ActivityEvent[];
+  currentUserId: string;
+  members: WorkspaceViewProps['members'];
+  tasks: TasksPanelProps['tasks'];
+}) {
+  if (events.length === 0) {
+    return <p className="px-4 py-6 text-[13px] text-fg-subtle">Nothing has happened here yet.</p>;
+  }
+  return (
+    <ol className="h-full overflow-y-auto px-3 py-3">
+      {events.map((event, index) => {
+        const line = describeEvent(event, { currentUserId, members, tasks });
+        return (
+          <li key={event.id} className="relative flex gap-3 pb-4 last:pb-1">
+            {/* The rail joins the events into one timeline, newest first. */}
+            {index < events.length - 1 ? <span className="absolute bottom-0 left-[3.5px] top-3 w-px bg-line" aria-hidden /> : null}
+            <span className={cx('relative mt-[7px] size-2 flex-none rounded-full ring-4 ring-panel', TONE_DOT[line.tone])} aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] leading-snug text-fg-muted">
+                <span className="font-medium text-fg">{line.actor}</span> {line.action}
+                {line.subject ? <span className="text-fg"> “{line.subject}”</span> : null}
+              </p>
+              <p className="mt-0.5 text-[11.5px] text-fg-subtle">
+                <time dateTime={event.createdAt}>{formatEventTime(event.createdAt)}</time>
+              </p>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
