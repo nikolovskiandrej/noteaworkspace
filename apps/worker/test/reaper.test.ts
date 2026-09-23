@@ -208,6 +208,17 @@ describeDb('reapWorkspace', () => {
     expect(runner.calls).toHaveLength(0);
   });
 
+  it('leaves a workspace alone whose project is not a git repository yet', async () => {
+    // A new workspace's project is an empty directory. The reaper used to run
+    // `git worktree list` there anyway, which fails, and logged a warning every minute.
+    await createTask('done');
+    const notARepo = { exitCode: 128, stderr: 'fatal: not a git repository (or any of the parent directories): .git' };
+    runner = new ScriptedCommandRunner().on('git rev-parse --is-inside-work-tree', notARepo).on(/^git /, notARepo);
+    const result = await reapWorkspace(deps(), deps().connect, workspaceId);
+    expect(result).toEqual({ removedWorktrees: 0, deletedBranches: 0 });
+    expect(runner.calls.map((c) => c.command)).toEqual(['git rev-parse --is-inside-work-tree']);
+  });
+
   it('reaps a done branch and a deleted task, keeps a failed task', async () => {
     const doneId = await createTask('done');
     const failedId = await createTask('failed');

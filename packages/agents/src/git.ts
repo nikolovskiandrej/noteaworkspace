@@ -98,12 +98,20 @@ export class GitWorktrees {
     private readonly paths: GitPaths = DEFAULT_GIT_PATHS,
   ) {}
 
+  /**
+   * True when the project directory is a git work tree. A new workspace's is not, until
+   * someone clones into it or its first task runs {@link ensureRepository}.
+   */
+  async isRepository(): Promise<boolean> {
+    const result = await this.runner.run('git rev-parse --is-inside-work-tree', { cwd: this.paths.projectDir });
+    return result.exitCode === 0;
+  }
+
   /** Makes sure the project is a git repository with at least one commit. */
   async ensureRepository(): Promise<{ initialized: boolean; branch: string }> {
     const { projectDir } = this.paths;
-    const isRepo = await this.runner.run('git rev-parse --is-inside-work-tree', { cwd: projectDir });
     let initialized = false;
-    if (isRepo.exitCode !== 0) {
+    if (!(await this.isRepository())) {
       await runOrThrow(this.runner, 'git init -b main', { cwd: projectDir });
       initialized = true;
     }

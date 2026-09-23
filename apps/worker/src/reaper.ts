@@ -185,6 +185,10 @@ export async function reapWorkspace(deps: ProcessorDeps, connect: ConnectWorkspa
   try {
     connection = await connect(workspaceId, { id: `reaper-${workspaceId}`, userId: 'notea:reaper', name: 'notea: cleanup', kind: 'agent', role: 'editor' });
     const git = new GitWorktrees(connection.runner, DEFAULT_GIT_PATHS);
+    // A workspace nobody has cloned into or run a task in has no repository yet, so it
+    // cannot hold task worktrees or branches; asking git anyway failed, and logged a
+    // warning, on every pass.
+    if (!(await git.isRepository())) return { removedWorktrees: 0, deletedBranches: 0 };
     const { worktrees, branches } = await gatherReapInputs(git, DEFAULT_GIT_PATHS, baseBranch);
     const plan = planReap({ worktrees, branches, taskStatus });
     if (plan.removeWorktrees.length === 0 && plan.deleteBranches.length === 0) return { removedWorktrees: 0, deletedBranches: 0 };
