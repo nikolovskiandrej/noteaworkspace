@@ -7,10 +7,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WS_CLOSE, type AgentMessage, type AgentMessageOf, type ClientMessage } from '@notea/protocol';
 import { AgentHub, FsService, ProcessManager, SessionManager, createAgentServer, silentLogger, type AgentServer } from '@notea/workspace-agent';
 import { fakeProcessFactory, fakePtyFactory, type FakePty } from '@notea/workspace-agent/testing';
+import { AgentTerminals } from '../src/agent-terminals';
 import { buildApp } from '../src/app';
 import type { WorkspaceRuntimeApi } from '../src/docker/workspace-runtime';
 import { RuntimeError } from '../src/errors';
 import { TokenService } from '../src/tokens';
+import { FakeTtyRunner } from './fake-tty';
 
 const noAgentExec = {
   start: async () => {
@@ -150,7 +152,7 @@ beforeAll(async () => {
     },
     waitForAgent: async () => ({ host: '127.0.0.1', port: agentPort }),
   };
-  app = await buildApp({ runtime, tokens, apiKey: API_KEY, agentExec: noAgentExec });
+  app = await buildApp({ runtime, tokens, apiKey: API_KEY, agentExec: noAgentExec, terminals: new AgentTerminals(new FakeTtyRunner()) });
   await app.listen({ port: 0, host: '127.0.0.1' });
   const address = app.server.address();
   if (!address || typeof address === 'string') throw new Error('no address');

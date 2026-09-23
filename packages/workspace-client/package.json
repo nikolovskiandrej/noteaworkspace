@@ -18,6 +18,8 @@
     "@notea/protocol": "0.0.1"
   },
   "devDependencies": {
-    "@notea/workspace-agent": "0.0.1"
+    "@notea/workspace-agent": "0.0.1",
+    "@types/ws": "^8.18.1",
+    "ws": "^8.21.3"
   }
 }

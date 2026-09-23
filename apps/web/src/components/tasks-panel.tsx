@@ -320,7 +320,7 @@ export function TasksPanel({ workspaceId, role, returnTo, tasks, runtimes, model
             <p className="mt-3 text-[13px] font-medium text-fg">No tasks yet</p>
             <p className="mx-auto mt-1 max-w-64 text-[12.5px] leading-relaxed text-fg-subtle">
               {canEdit
-                ? 'Queue one and an agent works on it in its own branch. Its run log shows up here as it goes.'
+                ? 'Prompts go to your Claude, in the middle. A task is for work in the background: an agent does it on a branch of its own, and it joins the project when someone approves it.'
                 : 'Tasks an editor queues show up here.'}
             </p>
           </li>

@@ -1,15 +1,14 @@
 'use client';
 
-import { Code, FolderTree, ListChecks, Play, Power, UserPlus, WifiOff, X } from 'lucide-react';
+import { Play, Power, SquareTerminal, UserPlus, Users, WifiOff, X } from 'lucide-react';
 import { AnimatePresence, m } from 'motion/react';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import type { WorkspaceRole } from '@notea/protocol';
 import { addMemberAction, removeMemberAction, startWorkspaceAction } from '@/lib/actions';
 import { describeEvent, formatEventTime, type ActivityEvent, type ActivityTone } from '@/lib/activity';
-import { Editor } from './editor';
-import { FileTree } from './file-tree';
+import { claudePanes } from '@/lib/claude-panes';
+import { ClaudeTerminal } from './claude-terminal';
 import { TasksPanel, type TasksPanelProps } from './tasks-panel';
-import { TerminalPanel } from './terminal-panel';
 import { Avatar } from './ui/avatar';
 import { cx } from './ui/cx';
 import { SegmentedTabs } from './ui/segmented-tabs';
@@ -43,7 +42,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             <h2 className="mt-4 text-[15px] font-semibold tracking-[-0.01em] text-fg">This workspace is not running</h2>
             <p className="mt-1.5 text-[13px] leading-relaxed text-fg-muted">
               {canStart
-                ? 'Start it to open its files and terminals. Files, history and task branches are kept while it is stopped.'
+                ? 'Start it to open everyone’s Claude. The project, its history and each person’s Claude sign-in are kept while it is stopped.'
                 : 'Ask an editor or the owner to start it. Its tasks are listed alongside.'}
             </p>
             {canStart ? (
@@ -78,17 +77,22 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   );
 }
 
-type MobileView = 'files' | 'code' | 'panel';
-type PanelTab = 'tasks' | 'people' | 'activity';
+type PanelTab = 'people' | 'activity' | 'tasks';
+
+/** The phone layout's switcher: one entry per Claude terminal (by member id), plus this. */
+const TEAM_VIEW = 'team';
 
 function WorkspaceLayout({ workspaceId, role, members, events, currentUserId, returnTo, tasks }: WorkspaceViewProps) {
   const { state, presence, lastClose } = useWorkspaceSocket();
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [tab, setTab] = useState<PanelTab>('tasks');
-  // Below the `lg` breakpoint one pane is shown at a time; every pane stays mounted so
-  // the editor keeps its unsaved text and the terminals keep their sessions.
-  const [view, setView] = useState<MobileView>('code');
-  const canWrite = role !== 'viewer';
+  // One Claude per member who can write, side by side: the whole middle of the page.
+  const panes = claudePanes(members, currentUserId);
+  const [tab, setTab] = useState<PanelTab>('people');
+  // Below the `lg` breakpoint one pane is shown at a time, your own Claude first; every
+  // pane stays mounted, so the terminals keep their connections while hidden.
+  const [chosen, setView] = useState<string>(() => panes.find((pane) => pane.isYou)?.userId ?? panes[0]?.userId ?? TEAM_VIEW);
+  // A member who was removed takes their pane with them.
+  const view = chosen === TEAM_VIEW || panes.some((pane) => pane.userId === chosen) ? chosen : (panes[0]?.userId ?? TEAM_VIEW);
+  const columns = { '--pane-columns': panes.length <= 3 ? Math.max(panes.length, 1) : 2 } as CSSProperties;
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -100,41 +104,31 @@ function WorkspaceLayout({ workspaceId, role, members, events, currentUserId, re
           value={view}
           onChange={setView}
           tabs={[
-            { id: 'files', label: 'Files', icon: <FolderTree className="size-3.5" aria-hidden /> },
-            { id: 'code', label: 'Code', icon: <Code className="size-3.5" aria-hidden /> },
-            { id: 'panel', label: 'Tasks', icon: <ListChecks className="size-3.5" aria-hidden />, count: tasks.tasks.length },
+            ...panes.map((pane) => ({ id: pane.userId, label: pane.shortLabel, icon: <SquareTerminal className="size-3.5" aria-hidden /> })),
+            { id: TEAM_VIEW, label: 'Team', icon: <Users className="size-3.5" aria-hidden /> },
           ]}
         />
       </div>
       <div id="workspace-view-panel" className="flex min-h-0 flex-1">
-        <aside
-          aria-label="Files"
+        <section
+          aria-label="Claude terminals"
+          style={columns}
           className={cx(
-            'min-h-0 min-w-0 flex-col bg-panel lg:flex lg:w-60 lg:flex-none lg:border-r lg:border-line xl:w-64',
-            view === 'files' ? 'flex flex-1' : 'hidden',
+            'min-h-0 min-w-0 flex-1 gap-px bg-line lg:grid lg:[grid-auto-rows:minmax(0,1fr)] lg:[grid-template-columns:repeat(var(--pane-columns),minmax(0,1fr))]',
+            view === TEAM_VIEW ? 'hidden' : 'flex',
           )}
         >
-          <FileTree
-            selectedPath={selectedPath}
-            onSelect={(path) => {
-              setSelectedPath(path);
-              setView('code');
-            }}
-          />
-        </aside>
-        <section aria-label="Editor and terminals" className={cx('min-h-0 min-w-0 flex-1 flex-col lg:flex', view === 'code' ? 'flex' : 'hidden')}>
-          <div className="min-h-0 flex-[3] border-b border-line">
-            <Editor path={selectedPath} canWrite={canWrite} />
-          </div>
-          <div className="min-h-0 flex-[2]">
-            <TerminalPanel canInput={canWrite} />
-          </div>
+          {panes.map((pane) => (
+            <div key={pane.userId} className={cx('min-h-0 min-w-0 flex-1 lg:block', view === pane.userId ? 'block' : 'hidden')}>
+              <ClaudeTerminal workspaceId={workspaceId} pane={pane} />
+            </div>
+          ))}
         </section>
         <aside
-          aria-label="Tasks, people and activity"
+          aria-label="People, activity and tasks"
           className={cx(
             'min-h-0 min-w-0 flex-col bg-panel lg:flex lg:w-80 lg:flex-none lg:border-l lg:border-line xl:w-[22rem]',
-            view === 'panel' ? 'flex flex-1' : 'hidden',
+            view === TEAM_VIEW ? 'flex flex-1' : 'hidden',
           )}
         >
           <div className="flex-none border-b border-line px-2 py-1.5">
@@ -144,9 +138,9 @@ function WorkspaceLayout({ workspaceId, role, members, events, currentUserId, re
               value={tab}
               onChange={setTab}
               tabs={[
-                { id: 'tasks', label: 'Tasks', count: tasks.tasks.length },
                 { id: 'people', label: 'People', count: presence.length },
                 { id: 'activity', label: 'Activity' },
+                { id: 'tasks', label: 'Tasks', count: tasks.tasks.length },
               ]}
             />
           </div>
@@ -160,11 +154,11 @@ function WorkspaceLayout({ workspaceId, role, members, events, currentUserId, re
             transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
             className="min-h-0 flex-1 overflow-hidden"
           >
-            {tab === 'tasks' ? <TasksPanel {...tasks} /> : null}
             {tab === 'people' ? (
               <PeoplePanel workspaceId={workspaceId} role={role} members={members} currentUserId={currentUserId} returnTo={returnTo} />
             ) : null}
             {tab === 'activity' ? <ActivityPanel events={events} currentUserId={currentUserId} members={members} tasks={tasks.tasks} /> : null}
+            {tab === 'tasks' ? <TasksPanel {...tasks} /> : null}
           </m.div>
         </aside>
       </div>

@@ -1,6 +1,6 @@
 # Notea Workspace
 
-A self-hosted, browser-based shared development workspace where people and AI coding agents work on the same project at the same time: persistent Linux environments, shared terminals, files, presence, and agent tasks that run in isolated git worktrees and are integrated only after review.
+A self-hosted, browser-based shared development workspace where people and AI coding agents work on the same project at the same time: persistent Linux environments, each member's own Claude side by side in one project, presence, and agent tasks that run in isolated git worktrees and are integrated only after review.
 
 Status: **M0–M1 done, agent task pipeline (M3/M4) working end to end**. Read `docs/HANDOFF.md` first if you are continuing development.
 
@@ -8,8 +8,8 @@ Status: **M0–M1 done, agent task pipeline (M3/M4) working end to end**. Read `
 
 ```
 apps/
-  orchestrator/       Runtime service: Docker lifecycle + WebSocket bridge (Fastify)
-  web/                Control plane: auth, workspaces, members, terminal, editor, tasks (Next.js 16)
+  orchestrator/       Runtime service: Docker lifecycle, WebSocket bridge, members' Claude terminals (Fastify)
+  web/                Control plane: auth, workspaces, members, Claude terminals, tasks (Next.js 16)
   worker/             Runs queued agent tasks in worktrees; integrates approved ones
 packages/
   protocol/           Shared message contract (zod schemas + types), protocol v1.1
@@ -38,7 +38,7 @@ npm run dev -w @notea/web                      # terminal 2 → http://127.0.0.1
 npm run dev -w @notea/worker                   # terminal 3 (agent tasks)
 ```
 
-Sign in, create a workspace, open a terminal, edit files. To run an agent task: connect a provider account under **AI & Claude** in the account menu (needs `CREDENTIALS_KEY` in `.env`) or log in to a CLI from a workspace terminal, then use **New task** in the workspace's Tasks panel. Finished tasks wait for **Approve & integrate**; the worker rebases, runs the policy's check command and fast-forwards the base branch.
+Sign in and create a workspace. The middle of the page is one Claude terminal per member who can write, side by side, working on the same project: yours starts by itself and, the first time, asks you to sign in with your own Claude account right there; everyone can watch everyone's, and only you can type into yours (`docs/DECISIONS.md` D-045). To run an agent task in the background instead: connect a provider account under **AI & Claude** in the account menu (needs `CREDENTIALS_KEY` in `.env`) or log in to a CLI from a workspace terminal, then use **New task** in the workspace's Tasks panel. Finished tasks wait for **Approve & integrate**; the worker rebases, runs the policy's check command and fast-forwards the base branch.
 
 After rebuilding the image, stop and start a workspace: the orchestrator recreates its container on the new image while keeping the volume.
 

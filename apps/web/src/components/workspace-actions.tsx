@@ -48,7 +48,7 @@ export function WorkspaceActions({ workspaceId, slug, name, returnTo }: { worksp
         title={`Delete ${name}?`}
         description={
           <>
-            This removes the container and its volume, with every file, terminal and task branch in it. It cannot be undone. Type{' '}
+            This removes the container and its volume: the project, its history, everyone’s Claude sign-in and every task branch. It cannot be undone. Type{' '}
             <code className="kbd">{slug}</code> to confirm.
           </>
         }

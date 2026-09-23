@@ -21,7 +21,7 @@ Project         /home/dev/project (main tree) + /home/dev/.notea/worktrees/<task
 ```
 
 ## 3. Modes
-- **Interactive** (available today by hand): open a terminal, run `claude`/`codex`/`gemini`; everyone can watch. Runs as `dev`, so a login made this way lands in the shared HOME and is *not* private to one member — use it only in a single-person workspace.
+- **Interactive** (implemented in session 12, D-045): every member who can write has their own Claude terminal on the workspace page — `claude`, interactive, in the main tree, as their `users.agent_uid` with their private HOME, so the login they make in it (`/login`, their own account) is theirs alone and their task runs can use it too. Everyone watches every terminal live; only its member types into it. The orchestrator holds the pty (`ARCHITECTURE.md` §4b). This is now how prompts are meant to be given; tasks are for work in the background.
 - **Headless task run** (implemented): the worker starts the runtime as the task owner's uid through the orchestrator; output is parsed into events and stored on the run, and the tasks panel shows them. This is the path that carries credentials.
 - **API loop** (later): same interface, Notea-owned tools.
 

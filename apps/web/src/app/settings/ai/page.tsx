@@ -63,6 +63,10 @@ export default async function AiSettingsPage({ searchParams }: { searchParams: P
             own Unix user inside the workspace container and are the only processes that ever receive them. Another member&apos;s shell, and another
             member&apos;s agent, cannot read them.
           </p>
+          <p className="mt-3 max-w-2xl rounded-lg border border-line bg-panel px-3.5 py-2.5 text-[13px] leading-relaxed text-fg-muted">
+            <span className="font-medium text-fg">Your Claude in a workspace needs none of this.</span> The first time it starts, it asks you to sign in with
+            your own Claude account, right in its terminal, and keeps that sign-in private to you. The connections below are only for agent tasks.
+          </p>
         </header>
 
         <div className="mt-6 space-y-3 empty:hidden">

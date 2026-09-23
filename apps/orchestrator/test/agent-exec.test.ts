@@ -59,8 +59,8 @@ describe('buildAgentExecOptions', () => {
     expect(options.Env).toContain('CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x');
     expect(options.Env).toContain('NOTEA_EXEC_UNSET=ANTHROPIC_API_KEY OPENAI_API_KEY');
     expect(EXEC_WRAPPER).toContain('for __notea_v in ${NOTEA_EXEC_UNSET:-}; do unset "$__notea_v"; done');
-    // The wrapper's own variables never reach the agent process.
-    expect(EXEC_WRAPPER).toContain('unset NOTEA_EXEC_UNSET NOTEA_EXEC_PIDFILE NOTEA_EXEC_HOME __notea_v');
+    // The wrapper's own variables, and the workspace agent's token, never reach the agent process.
+    expect(EXEC_WRAPPER).toContain('unset NOTEA_EXEC_UNSET NOTEA_EXEC_PIDFILE NOTEA_EXEC_HOME NOTEA_AGENT_TOKEN __notea_v');
   });
 
   it('refuses environment names that would redirect the agent or its credentials', () => {

@@ -5,10 +5,12 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
+import { AgentTerminals } from '../src/agent-terminals';
 import { buildApp, redactQuery } from '../src/app';
 import type { WorkspaceRuntimeApi } from '../src/docker/workspace-runtime';
 import { RuntimeError } from '../src/errors';
 import { TokenService } from '../src/tokens';
+import { FakeTtyRunner } from './fake-tty';
 
 const noAgentExec = {
   start: async () => {
@@ -47,6 +49,7 @@ async function appWithCapturedLog(): Promise<{ app: FastifyInstance; lines: stri
   const lines: string[] = [];
   const built = await buildApp({
     agentExec: noAgentExec,
+    terminals: new AgentTerminals(new FakeTtyRunner()),
     runtime: unusedRuntime(),
     tokens: new TokenService({
       connectTokenSecret: 'c'.repeat(32),

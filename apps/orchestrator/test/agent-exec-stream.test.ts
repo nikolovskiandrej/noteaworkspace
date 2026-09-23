@@ -2,11 +2,13 @@ import { PassThrough } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AgentExecFrame } from '@notea/protocol';
+import { AgentTerminals } from '../src/agent-terminals';
 import { buildApp } from '../src/app';
 import type { AgentExecRunner } from '../src/docker/agent-exec';
 import type { WorkspaceRuntimeApi } from '../src/docker/workspace-runtime';
 import { RuntimeError } from '../src/errors';
 import { TokenService } from '../src/tokens';
+import { FakeTtyRunner } from './fake-tty';
 
 const API_KEY = 'orchestrator-test-api-key';
 
@@ -55,7 +57,7 @@ beforeAll(async () => {
     },
   };
   const tokens = new TokenService({ connectTokenSecret: 'c'.repeat(32), agentTokenSecret: 'a'.repeat(32), defaultTtlSeconds: 300, maxTtlSeconds: 3600 });
-  app = await buildApp({ runtime, tokens, apiKey: API_KEY, agentExec, execKeepaliveMs: 20 });
+  app = await buildApp({ runtime, tokens, apiKey: API_KEY, agentExec, terminals: new AgentTerminals(new FakeTtyRunner()), execKeepaliveMs: 20 });
   await app.listen({ port: 0, host: '127.0.0.1' });
   const address = app.server.address();
   if (!address || typeof address === 'string') throw new Error('no address');

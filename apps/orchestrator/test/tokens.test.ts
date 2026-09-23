@@ -62,3 +62,39 @@ describe('TokenService agent tokens', () => {
     expect(service({ agentTokenSecret: 'b'.repeat(32) }).agentToken('ws-1')).not.toBe(tokens.agentToken('ws-1'));
   });
 });
+
+describe('TokenService agent-terminal tokens', () => {
+  const terminalClaims = {
+    sub: 'user-2',
+    ws: 'ws-1',
+    name: 'Niche',
+    role: 'editor' as const,
+    owner: { userId: 'user-1', name: 'Andrej', email: 'andrej@notea.mk', uid: 20_003 },
+    input: false,
+  };
+
+  it('round-trips claims', async () => {
+    const tokens = service();
+    const { token } = await tokens.issueAgentTerminalToken(terminalClaims);
+    expect(await tokens.verifyAgentTerminalToken(token, 'ws-1')).toEqual(terminalClaims);
+  });
+
+  it('is not interchangeable with a connect token, in either direction', async () => {
+    const tokens = service();
+    const terminal = await tokens.issueAgentTerminalToken(terminalClaims);
+    const connect = await tokens.issueConnectToken(claims);
+    await expect(tokens.verifyConnectToken(terminal.token, 'ws-1')).rejects.toThrow(/invalid connect token/);
+    await expect(tokens.verifyAgentTerminalToken(connect.token, 'ws-1')).rejects.toThrow(/invalid terminal token/);
+  });
+
+  it('rejects another workspace, expiry and tampering', async () => {
+    let now = 1_700_000_000_000;
+    const tokens = service({ now: () => now, defaultTtlSeconds: 10 });
+    const { token } = await tokens.issueAgentTerminalToken(terminalClaims);
+    await expect(tokens.verifyAgentTerminalToken(token, 'ws-2')).rejects.toThrow(/another workspace/);
+    await expect(tokens.verifyAgentTerminalToken(`${token.slice(0, -2)}xx`, 'ws-1')).rejects.toThrow(/invalid terminal token/);
+    now += 11_000;
+    await expect(tokens.verifyAgentTerminalToken(token, 'ws-1')).rejects.toThrow(/invalid terminal token/);
+    await expect(tokens.verifyAgentTerminalToken('', 'ws-1')).rejects.toThrow(/missing terminal token/);
+  });
+});

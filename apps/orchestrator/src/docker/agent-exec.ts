@@ -32,7 +32,7 @@ export interface AgentExecLimits {
 /**
  * Wrapper the agent process is started through. A fixed string: the orchestrator
  * never interpolates caller data into a shell command, so there is no place for
- * command injection. It does three things before handing over with `exec`:
+ * command injection. It does these things before handing over with `exec`:
  *
  *   - `umask 002`, so files the agent writes stay group-writable and the `dev`
  *     user (and the reaper) can still commit, rebase and delete them;
@@ -41,14 +41,17 @@ export interface AgentExecLimits {
  *   - records its own pid, which is also its process-group id thanks to `setsid`,
  *     so cancellation can signal the whole tree rather than just the shell;
  *   - clears the credential variables this run must not see, so an agent can never
- *     inherit another authentication mode or another member's leftover export.
+ *     inherit another authentication mode or another member's leftover export;
+ *   - clears the workspace agent's own token, which every exec inherits from the
+ *     container's environment. No agent process needs it, and whoever holds it can
+ *     connect to the workspace agent as anyone.
  */
 export const EXEC_WRAPPER = [
   'umask 002',
   'if [ -n "${NOTEA_EXEC_HOME:-}" ]; then mkdir -p "$NOTEA_EXEC_HOME" && chmod 700 "$NOTEA_EXEC_HOME" && HOME="$NOTEA_EXEC_HOME" && export HOME || exit 70; fi',
   'if [ -n "${NOTEA_EXEC_PIDFILE:-}" ]; then printf %s "$$" > "$NOTEA_EXEC_PIDFILE"; fi',
   'for __notea_v in ${NOTEA_EXEC_UNSET:-}; do unset "$__notea_v"; done',
-  'unset NOTEA_EXEC_UNSET NOTEA_EXEC_PIDFILE NOTEA_EXEC_HOME __notea_v',
+  'unset NOTEA_EXEC_UNSET NOTEA_EXEC_PIDFILE NOTEA_EXEC_HOME NOTEA_AGENT_TOKEN __notea_v',
   'exec "$@"',
 ].join('\n');
 

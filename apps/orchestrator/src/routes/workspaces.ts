@@ -2,7 +2,14 @@ import { timingSafeEqual } from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ClientKindSchema, WorkspaceRoleSchema, type AgentExecFrame, type IssueConnectTokenResponse } from '@notea/protocol';
+import {
+  ClientKindSchema,
+  WorkspaceRoleSchema,
+  type AgentExecFrame,
+  type IssueAgentTerminalTokenResponse,
+  type IssueConnectTokenResponse,
+} from '@notea/protocol';
+import type { AgentTerminals } from '../agent-terminals';
 import { collectAgentExec, type AgentExecRunner } from '../docker/agent-exec';
 import type { WorkspaceRuntimeApi } from '../docker/workspace-runtime';
 import { RuntimeError } from '../errors';
@@ -49,11 +56,26 @@ const AgentExecSchema = z.object({
 
 const KillAgentExecSchema = z.object({ uid: z.number().int() });
 
+const IssueAgentTerminalTokenSchema = z.object({
+  workspaceId: z.string().min(1).max(64),
+  userId: z.string().min(1).max(128),
+  name: z.string().min(1).max(200),
+  role: WorkspaceRoleSchema,
+  owner: z.object({
+    userId: z.string().min(1).max(128),
+    name: z.string().min(1).max(200),
+    email: z.string().max(320),
+    uid: z.number().int(),
+  }),
+  ttlSeconds: z.number().int().positive().optional(),
+});
+
 export interface WorkspaceRoutesDeps {
   runtime: WorkspaceRuntimeApi;
   tokens: TokenService;
   apiKey: string;
   agentExec: AgentExecRunner;
+  terminals: AgentTerminals;
   /** Interval of keepalive frames on streamed agent execs; tests shorten it. */
   execKeepaliveMs?: number;
 }
@@ -154,6 +176,33 @@ export async function registerWorkspaceRoutes(app: FastifyInstance, deps: Worksp
     const body = parseBody(KillAgentExecSchema, request.body);
     const containerId = await runningContainerId(deps, request.params.id);
     await deps.agentExec.kill(containerId, request.params.execId, body.uid);
+    reply.code(204);
+    return null;
+  });
+
+  /**
+   * A token for one member's Claude terminal (D-045). The control plane names the
+   * member it belongs to; typing is granted here, not by the caller, and only to that
+   * member when their role lets them write.
+   */
+  app.post('/agent-terminal-tokens', async (request): Promise<IssueAgentTerminalTokenResponse> => {
+    const body = parseBody(IssueAgentTerminalTokenSchema, request.body);
+    const input = body.userId === body.owner.userId && body.role !== 'viewer';
+    const issued = await deps.tokens.issueAgentTerminalToken(
+      { sub: body.userId, ws: body.workspaceId, name: body.name, role: body.role, owner: body.owner, input },
+      body.ttlSeconds,
+    );
+    return { ...issued, wsPath: `/ws/workspaces/${encodeURIComponent(body.workspaceId)}/agent-terminal`, canInput: input };
+  });
+
+  /** Ends a member's Claude terminal, e.g. when they leave the workspace. */
+  app.post<{ Params: { id: string; uid: string } }>('/workspaces/:id/agent-terminals/:uid/stop', async (request, reply) => {
+    const uid = Number(request.params.uid);
+    if (!Number.isInteger(uid)) throw new RuntimeError(400, 'bad_request', 'uid must be an integer');
+    const info = await deps.runtime.inspect(request.params.id);
+    if (info?.status === 'running' && info.containerId) {
+      await deps.terminals.stop(request.params.id, uid, info.containerId);
+    }
     reply.code(204);
     return null;
   });

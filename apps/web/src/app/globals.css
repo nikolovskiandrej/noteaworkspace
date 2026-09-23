@@ -562,16 +562,6 @@
   animation: var(--animate-enter);
 }
 
-/* ---- third-party surfaces ------------------------------------------------------ */
-
-/* CodeMirror fills its container. */
-.cm-editor {
-  height: 100%;
-}
-.cm-scroller {
-  overflow: auto;
-}
-
 /* ---- keyframes -------------------------------------------------------------- */
 
 @keyframes status-halo {

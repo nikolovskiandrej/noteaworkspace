@@ -11,9 +11,11 @@ import Docker from 'dockerode';
 import type { FastifyInstance } from 'fastify';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { AgentMessage, AgentMessageOf, ClientMessage } from '@notea/protocol';
+import type { AgentMessage, AgentMessageOf, AgentTerminalServerMessage, ClientMessage, IssueAgentTerminalTokenResponse } from '@notea/protocol';
+import { AgentTerminals } from '../src/agent-terminals';
 import { buildApp } from '../src/app';
 import { DockerAgentExec, collectAgentExec } from '../src/docker/agent-exec';
+import { DockerAgentTty } from '../src/docker/agent-terminal';
 import { loadConfig } from '../src/config';
 import { WorkspaceRuntime } from '../src/docker/workspace-runtime';
 import { TokenService } from '../src/tokens';
@@ -25,6 +27,8 @@ const workspaceId = `e2e-${randomBytes(4).toString('hex')}`;
 let app: FastifyInstance;
 let runtime: WorkspaceRuntime;
 let agentExec: DockerAgentExec;
+let terminals: AgentTerminals;
+let ttyRunner: DockerAgentTty;
 let tokens: TokenService;
 let baseUrl: string;
 
@@ -86,7 +90,14 @@ describeE2E('docker end-to-end', () => {
       agentTokenFor: (id) => tokens.agentToken(id),
       log: { info: () => undefined, warn: () => undefined },
     });
-    app = await buildApp({ runtime, tokens, apiKey: config.apiKey, agentExec });
+    // An interactive shell stands in for the Claude CLI, which would ask to log in.
+    ttyRunner = new DockerAgentTty(
+      docker,
+      { uidMin: config.agentUidRange.min, uidMax: config.agentUidRange.max, gid: config.agentUidRange.gid },
+      ['/bin/bash', '--noprofile', '--norc', '-i'],
+    );
+    terminals = new AgentTerminals(ttyRunner);
+    app = await buildApp({ runtime, tokens, apiKey: config.apiKey, agentExec, terminals });
     await app.listen({ port: 0, host: '127.0.0.1' });
     const address = app.server.address();
     if (!address || typeof address === 'string') throw new Error('no address');
@@ -94,6 +105,7 @@ describeE2E('docker end-to-end', () => {
   }, 60_000);
 
   afterAll(async () => {
+    if (terminals) await terminals.shutdown().catch(() => undefined);
     if (runtime) await runtime.remove(workspaceId, { deleteVolume: true }).catch(() => undefined);
     if (app) await app.close();
   }, 60_000);
@@ -289,7 +301,210 @@ describeE2E('docker end-to-end', () => {
     },
     180_000,
   );
+
+  /**
+   * A member's own Claude terminal (D-045), through the real route and a real
+   * container: the pty runs as the member's uid with their private HOME, everyone can
+   * watch it, only its member can type, what it writes into the project stays
+   * writable for the others, and stopping it ends its process tree.
+   */
+  it(
+    'runs each member’s terminal as their own uid, lets only them type, and shares the project',
+    async () => {
+      const container = docker.getContainer(`notea-ws-${workspaceId}`);
+      const andrej = { userId: 'u-andrej', name: 'Andrej', email: 'andrej@example.test', uid: 20_003 };
+      const niche = { userId: 'u-niche', name: 'Niche', email: 'niche@example.test', uid: 20_004 };
+
+      const open = async (viewer: { userId: string; name: string }, owner: typeof andrej) => {
+        const response = await fetch(`http://${baseUrl}/agent-terminal-tokens`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${config.apiKey}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ workspaceId, userId: viewer.userId, name: viewer.name, role: 'editor', owner }),
+        });
+        expect(response.status).toBe(200);
+        const issued = (await response.json()) as IssueAgentTerminalTokenResponse;
+        return TerminalSocket.open(`ws://${baseUrl}${issued.wsPath}?token=${encodeURIComponent(issued.token)}`);
+      };
+
+      const own = await open(andrej, andrej);
+      const watcher = await open(niche, andrej);
+      expect((await own.hello()).canInput).toBe(true);
+      const watcherHello = await watcher.hello();
+      expect(watcherHello.canInput).toBe(false);
+      expect(watcherHello.terminal.status).toBe('idle');
+
+      // A viewer cannot start someone else's terminal.
+      watcher.send({ type: 'start', cols: 100, rows: 30 });
+      expect((await watcher.nextOfType('error')).message).toMatch(/Only Andrej can type/);
+
+      own.send({ type: 'start', cols: 100, rows: 30 });
+      await own.until((m) => m.type === 'state' && m.terminal.status === 'running');
+
+      const done = `NOTEA_TERM_DONE_${randomBytes(3).toString('hex')}`;
+      own.send({
+        type: 'input',
+        data: `id -u; echo "HOME=$HOME"; umask; stat -c '%a %U' /home/dev/project; env | grep -c NOTEA_AGENT_TOKEN; echo hi > from-andrej.txt; stat -c '%a %u %G' from-andrej.txt; echo "tty=$(tty) pgid=$(ps -o pgid= -p $$) tpgid=$(ps -o tpgid= -p $$)"; echo ${done.slice(0, 8)}"${done.slice(8)}"\r`,
+      });
+      const transcript = plain(await own.output((text) => text.includes(`${done}\r\n`)));
+      expect(transcript).toMatch(/\n20003\n/);
+      expect(transcript).toContain('HOME=/home/dev/.notea/agents/20003\n');
+      expect(transcript).toContain('\n0002\n');
+      // The share step made the project group-writable and setgid.
+      expect(transcript).toContain('\n2775 dev\n');
+      // The workspace agent's token is not in a member's environment.
+      expect(transcript).toMatch(/\n0\n/);
+      expect(transcript).toContain('\n664 20003 dev\n');
+      // The pty is the shell's controlling terminal and it is in the foreground:
+      // resizes reach it as SIGWINCH.
+      const [, pgid, tpgid] = /tty=\/dev\/pts\/\d+ pgid= *(\d+) tpgid= *(\d+)/.exec(transcript) ?? [];
+      expect(pgid).toBeDefined();
+      expect(tpgid).toBe(pgid);
+      // The watcher saw the same output, live.
+      expect(plain(await watcher.output((text) => text.includes(`${done}\r\n`)))).toContain('664 20003 dev');
+
+      // The watcher's keystrokes go nowhere.
+      watcher.send({ type: 'input', data: 'touch /tmp/watcher-typed-this\r' });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(await runAs(container, 1000, 'ls /tmp/watcher-typed-this 2>&1 || true')).toMatch(/No such file/);
+
+      // Niche's own terminal edits the file Andrej's created: the project is shared.
+      const nicheOwn = await open(niche, niche);
+      await nicheOwn.hello();
+      nicheOwn.send({ type: 'start', cols: 100, rows: 30 });
+      await nicheOwn.until((m) => m.type === 'state' && m.terminal.status === 'running');
+      const nicheDone = `NOTEA_NICHE_DONE_${randomBytes(3).toString('hex')}`;
+      nicheOwn.send({ type: 'input', data: `id -u; echo more >> from-andrej.txt && echo appended; echo ${nicheDone.slice(0, 8)}"${nicheDone.slice(8)}"\r` });
+      const nicheTranscript = plain(await nicheOwn.output((text) => text.includes(`${nicheDone}\r\n`)));
+      expect(nicheTranscript).toMatch(/\n20004\n/);
+      expect(nicheTranscript).toContain('\nappended\n');
+      expect(await runAs(container, 1000, 'cat /home/dev/project/from-andrej.txt')).toBe('hi\nmore\n');
+      // …but not Andrej's private HOME, where his CLI keeps its login.
+      expect(await runAs(container, niche.uid, 'ls /home/dev/.notea/agents/20003 2>&1 || true')).toMatch(/Permission denied/);
+
+      // Someone who opens the terminal later gets what is on it.
+      const late = await open({ userId: 'u-late', name: 'Late' }, andrej);
+      const lateHello = await late.hello();
+      expect(lateHello.terminal.status).toBe('running');
+      expect(lateHello.screen).toContain('664 20003 dev');
+
+      // Stopping ends the shell and whatever it started.
+      own.send({ type: 'input', data: 'sleep 600 &\r' });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      own.send({ type: 'stop' });
+      await own.until((m) => m.type === 'state' && m.terminal.status === 'exited');
+      // The stop script itself runs as the member until the last process is gone.
+      await eventually(async () => expect((await runAs(container, 1000, 'pgrep -u 20003 -a || true')).trim()).toBe(''));
+
+      // A terminal whose orchestrator went away is ended before a new one starts: a
+      // second manager (a restarted orchestrator) starting Niche's must not leave two.
+      const restarted = new AgentTerminals(ttyRunner);
+      await restarted.start(workspaceId, container.id, { uid: niche.uid, name: niche.name, email: niche.email }, { cols: 80, rows: 24 });
+      await nicheOwn.until((m) => m.type === 'state' && m.terminal.status === 'exited');
+      // The new one's wrapper hands over to bash a moment after the exec starts.
+      await eventually(async () => expect((await runAs(container, 1000, 'pgrep -u 20004 -x bash | wc -l')).trim()).toBe('1'));
+      await restarted.shutdown();
+      await eventually(async () => expect((await runAs(container, 1000, 'pgrep -u 20004 -a || true')).trim()).toBe(''));
+
+      for (const socket of [own, watcher, nicheOwn, late]) socket.close();
+      await runAs(container, 1000, 'rm -f /home/dev/project/from-andrej.txt');
+    },
+    180_000,
+  );
 });
+
+/** Retries an assertion for a few seconds: processes take a moment to go. */
+async function eventually(assertion: () => Promise<void>, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      await assertion();
+      return;
+    } catch (err) {
+      if (Date.now() > deadline) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+}
+
+/** Terminal output as plain lines: no escape sequences, `\n` line ends. */
+function plain(text: string): string {
+  return text.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r+\n/g, '\n').replace(/\r/g, '');
+}
+
+/** A client of the agent-terminal route that queues what it receives. */
+class TerminalSocket {
+  private readonly queue: AgentTerminalServerMessage[] = [];
+  private readonly waiters: Array<() => void> = [];
+  private text = '';
+
+  private constructor(private readonly ws: WebSocket) {
+    ws.on('message', (raw) => {
+      const message = JSON.parse(raw.toString()) as AgentTerminalServerMessage;
+      if (message.type === 'output') this.text += message.data;
+      this.queue.push(message);
+      for (const wake of this.waiters.splice(0)) wake();
+    });
+  }
+
+  static async open(url: string): Promise<TerminalSocket> {
+    const ws = new WebSocket(url);
+    await new Promise<void>((resolve, reject) => {
+      ws.once('open', () => resolve());
+      ws.once('error', reject);
+    });
+    return new TerminalSocket(ws);
+  }
+
+  send(message: object): void {
+    this.ws.send(JSON.stringify(message));
+  }
+
+  close(): void {
+    this.ws.close();
+  }
+
+  async hello(): Promise<Extract<AgentTerminalServerMessage, { type: 'hello' }>> {
+    return (await this.until((m) => m.type === 'hello')) as Extract<AgentTerminalServerMessage, { type: 'hello' }>;
+  }
+
+  async nextOfType<T extends AgentTerminalServerMessage['type']>(type: T): Promise<Extract<AgentTerminalServerMessage, { type: T }>> {
+    return (await this.until((m) => m.type === type)) as Extract<AgentTerminalServerMessage, { type: T }>;
+  }
+
+  /** Consumes messages until one matches. */
+  async until(predicate: (m: AgentTerminalServerMessage) => boolean, timeoutMs = 30_000): Promise<AgentTerminalServerMessage> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const index = this.queue.findIndex(predicate);
+      if (index !== -1) return this.queue.splice(0, index + 1).at(-1)!;
+      this.queue.length = 0;
+      if (Date.now() > deadline) throw new Error('timeout waiting for a terminal message');
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, Math.max(0, deadline - Date.now()));
+        this.waiters.push(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+  }
+
+  /** Everything printed so far, once it satisfies `predicate`. */
+  async output(predicate: (text: string) => boolean, timeoutMs = 30_000): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate(this.text)) {
+      if (Date.now() > deadline) throw new Error(`timeout; terminal showed: ${JSON.stringify(this.text.slice(-500))}`);
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 200);
+        this.waiters.push(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+    return this.text;
+  }
+}
 
 /**
  * Runs a throw-away command in the container as an arbitrary uid and returns its

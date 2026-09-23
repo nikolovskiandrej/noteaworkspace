@@ -1,9 +1,11 @@
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { OrchestratorErrorBody } from '@notea/protocol';
+import type { AgentTerminals } from './agent-terminals';
 import type { AgentExecRunner } from './docker/agent-exec';
 import type { WorkspaceRuntimeApi } from './docker/workspace-runtime';
 import { RuntimeError } from './errors';
+import { registerAgentTerminalRoute } from './routes/agent-terminal';
 import { registerBridge } from './routes/bridge';
 import { registerDevConsole } from './routes/dev-console';
 import { registerWorkspaceRoutes } from './routes/workspaces';
@@ -15,6 +17,8 @@ export interface AppDeps {
   apiKey: string;
   /** Runs agent processes under a per-user uid; see docker/agent-exec.ts. */
   agentExec: AgentExecRunner;
+  /** Members' own Claude terminals; see agent-terminals.ts. */
+  terminals: AgentTerminals;
   /** Keepalive interval on streamed agent execs (default 30 s); tests shorten it. */
   execKeepaliveMs?: number;
   logger?: FastifyServerOptions['logger'];
@@ -83,12 +87,14 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     tokens: deps.tokens,
     resolveAgent: (workspaceId) => deps.runtime.agentEndpoint(workspaceId),
   });
+  registerAgentTerminalRoute(app, { tokens: deps.tokens, runtime: deps.runtime, terminals: deps.terminals });
   await app.register(async (scoped) => {
     await registerWorkspaceRoutes(scoped, {
       runtime: deps.runtime,
       tokens: deps.tokens,
       apiKey: deps.apiKey,
       agentExec: deps.agentExec,
+      terminals: deps.terminals,
       execKeepaliveMs: deps.execKeepaliveMs,
     });
   });

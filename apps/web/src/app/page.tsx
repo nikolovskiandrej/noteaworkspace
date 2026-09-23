@@ -42,7 +42,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
           <div className="mt-6 rounded-lg border border-dashed border-line-strong px-6 py-10 text-center">
             <p className="text-[14px] font-medium text-fg">No workspaces yet</p>
             <p className="mx-auto mt-1.5 max-w-md text-[13px] leading-relaxed text-fg-muted">
-              Each workspace is its own container with shared terminals, files and agent tasks. Name one above to create it.
+              Each workspace is one project in a container of its own, with a Claude for each member, side by side. Name one above to create it.
             </p>
           </div>
         ) : (

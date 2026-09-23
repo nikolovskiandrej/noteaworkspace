@@ -2,9 +2,11 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import Docker from 'dockerode';
 import type { FastifyInstance } from 'fastify';
+import { AgentTerminals } from './agent-terminals';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 import { DockerAgentExec } from './docker/agent-exec';
+import { DockerAgentTty } from './docker/agent-terminal';
 import { WorkspaceRuntime } from './docker/workspace-runtime';
 import { TokenService } from './tokens';
 
@@ -41,15 +43,19 @@ async function main(): Promise<void> {
       warn: (obj, msg) => app?.log.warn(obj, msg),
     },
   });
+  const uidLimits = { uidMin: config.agentUidRange.min, uidMax: config.agentUidRange.max, gid: config.agentUidRange.gid };
+  const terminals = new AgentTerminals(new DockerAgentTty(docker, uidLimits), {
+    log: {
+      info: (obj, msg) => app?.log.info(obj, msg),
+      warn: (obj, msg) => app?.log.warn(obj, msg),
+    },
+  });
   app = await buildApp({
     runtime,
     tokens,
     apiKey: config.apiKey,
-    agentExec: new DockerAgentExec(docker, {
-      uidMin: config.agentUidRange.min,
-      uidMax: config.agentUidRange.max,
-      gid: config.agentUidRange.gid,
-    }),
+    agentExec: new DockerAgentExec(docker, uidLimits),
+    terminals,
     logger: { level: config.logLevel },
     devConsole: config.devConsole,
   });
@@ -64,8 +70,14 @@ async function main(): Promise<void> {
 
   await app.listen({ port: config.port, host: config.host });
 
+  let stopping = false;
   const shutdown = async (signal: string) => {
+    if (stopping) return;
+    stopping = true;
     app?.log.info({ signal }, 'shutting down');
+    // Members' Claude terminals cannot be re-attached by the next process; end them
+    // rather than leave them running unwatched.
+    await terminals.shutdown().catch(() => undefined);
     await app?.close();
     process.exit(0);
   };

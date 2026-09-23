@@ -1,6 +1,6 @@
 # Notea Workspace — Security Model
 
-Last updated: 2026-09-15 (session 6). Scope: what is implemented, what is acceptable for **personal use**, what must change before **public/commercial** use.
+Last updated: 2026-09-23 (session 12: members' Claude terminals). Scope: what is implemented, what is acceptable for **personal use**, what must change before **public/commercial** use.
 
 ## 1. Assets and actors
 Assets: host machine, project files and secrets on workspace volumes, provider API keys, user accounts, other workspaces on the host, the Postgres database (tasks, events, encrypted credentials).
@@ -20,7 +20,9 @@ Actors: owner (trusted), invited collaborators (semi-trusted, shell access insid
 
 **Container ↔ host.** Non-root `dev`, no sudo, `no-new-privileges`, `CapDrop ALL`, no bind mounts, cpu/mem/pids/shm limits, log rotation, `Init: true`; only the agent port is reachable (loopback in `published` mode).
 
-**Agent exec/env.** Injected environment names must match `^[A-Z][A-Z0-9_]{0,63}$`; `PATH`, `HOME`, `USER`, `SHELL`, `LD_*`, `NODE_OPTIONS` and `NOTEA_*` are rejected (tested). Exec output is capped (8 MB), timed out (≤60 min) and killed when the owning connection closes. Exec/terminal creation requires the editor role.
+**Agent exec/env.** Injected environment names must match `^[A-Z][A-Z0-9_]{0,63}$`; `PATH`, `HOME`, `USER`, `SHELL`, `LD_*`, `NODE_OPTIONS` and `NOTEA_*` are rejected (tested). Since session 12 the agent-exec wrapper also clears `NOTEA_AGENT_TOKEN`, which every `docker exec` inherits from the container, so no member's process holds the workspace agent's token. Exec output is capped (8 MB), timed out (≤60 min) and killed when the owning connection closes. Exec/terminal creation requires the editor role.
+
+**Members' Claude terminals (D-045).** Each member who can write has an interactive `claude` in the workspace, running as their own uid with their private HOME, so the login they make in it is theirs alone, exactly like an agent run's credential. The orchestrator holds its pty and serves it over `/ws/workspaces/:id/agent-terminal` with a token of its own audience (a connect token is refused there, and a terminal token is refused by the bridge). Every member can watch every terminal; only its own member can type into it, resize, start or stop it, and the orchestrator enforces that per message from the token, not the browser. As on the bridge, what a client sends before its token is checked is held, and capped (1 MB). Typing is what has to be protected: whoever types into someone's Claude can ask it for their credentials. Consequences, by design: everything a member's Claude shows (a pasted secret included) is visible to the other members, and a Claude can be steered by what another member's Claude writes into the shared files. The browser lets a program write to the clipboard (OSC 52) only in the viewer's own terminal and never lets one read it. Leaving the workspace ends the member's terminal.
 
 **Agent tasks.** Creating/approving/cancelling tasks requires editor; deleting tasks and editing the policy require owner. Agents run as **the uid of the member whose task it is** (never as `dev`, and never as another member); they cannot reach the control plane or other workspaces beyond what any shell in that container could. Agents never touch the main tree: integration is a fast-forward performed by the worker after a human (or the `auto` policy) approves.
 
@@ -75,13 +77,19 @@ Actors: owner (trusted), invited collaborators (semi-trusted, shell access insid
 
 | Who | Runs as | Can read |
 |---|---|---|
-| Human terminals, file tree, editor, integration | `dev` (uid 1000, gid 1000) | the project; not any agent's environment or HOME |
-| Andrej's agent tasks | `users.agent_uid` for Andrej, gid 1000 | the project; only Andrej's credential and HOME |
-| Niche's agent tasks | `users.agent_uid` for Niche, gid 1000 | the project; only Niche's credential and HOME |
+| The workspace agent, integration, the reaper (and the dev console's shells) | `dev` (uid 1000, gid 1000) | the project; not any agent's environment or HOME |
+| Andrej's Claude terminal and agent tasks | `users.agent_uid` for Andrej, gid 1000 | the project; only Andrej's login, credential and HOME |
+| Niche's Claude terminal and agent tasks | `users.agent_uid` for Niche, gid 1000 | the project; only Niche's login, credential and HOME |
 
 The shared `dev` **group** is what lets all of them work on one project: the repository
 is `core.sharedRepository=group`, `~/.notea/{worktrees,runs,agents}` are `2775`, and
-agent processes run with `umask 002`. Nothing is granted to `other`. `dev` creates a
+agent processes run with `umask 002`. Nothing is granted to `other`. Since the members'
+Claudes work in the main tree itself (D-045), `dev` also makes the project directory
+tree group-writable and setgid before a terminal starts, and trusts any repository in
+its global git config (`safe.directory = *`): the repository belongs to whichever
+member's Claude created it, and git refuses another user's repository. Inside a
+workspace container every uid is one Notea allocated, so that protection means nothing
+there. `dev` creates a
 task's worktree and performs integration; the agent works inside it; the reaper (also
 `dev`) can still delete what the agent wrote.
 

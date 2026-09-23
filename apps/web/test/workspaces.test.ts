@@ -67,6 +67,10 @@ class FakeOrchestrator {
   async issueConnectToken() {
     return { token: 't', expiresAt: '', wsPath: '/ws' };
   }
+  async stopAgentTerminal(id: string, uid: number) {
+    this.calls.push(`stop-terminal:${id}:${uid}`);
+    if (this.unreachable) throw new Error('orchestrator unreachable: connect ECONNREFUSED');
+  }
 }
 
 describe('roleAtLeast', () => {
@@ -178,7 +182,16 @@ describeDb('workspace service', () => {
     await expect(addMember(deps(), ownerId, workspace.id, { email: ownerEmail, role: 'editor' })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(addMember(deps(), ownerId, workspace.id, { email: 'ghost@example.com', role: 'editor' })).rejects.toBeInstanceOf(NotFoundError);
 
-    await removeMember(deps(), ownerId, workspace.id, otherId);
+    // Removing a member also ends their Claude terminal, and an orchestrator that
+    // cannot be reached does not undo the removal.
+    const removedUid = (await handle.db.query.users.findFirst({ where: eq(users.id, otherId), columns: { agentUid: true } }))!.agentUid;
+    orchestrator.unreachable = true;
+    try {
+      await removeMember(deps(), ownerId, workspace.id, otherId);
+    } finally {
+      orchestrator.unreachable = false;
+    }
+    expect(orchestrator.calls).toContain(`stop-terminal:${workspace.id}:${removedUid}`);
     expect(await handle.db.query.workspaceMembers.findMany({ where: eq(workspaceMembers.workspaceId, workspace.id) })).toHaveLength(1);
 
     // Owner deletes: runtime removed, row soft-deleted and hidden from lists.

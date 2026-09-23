@@ -58,12 +58,12 @@ A shared live AI engineering workspace:
 1. Open Notea Workspace, sign in.
 2. Create a workspace: **a name, and optionally a slug — that is all the code accepts** (`createWorkspace` in `apps/web/src/lib/workspaces.ts`). There is no repository-URL field and no image picker; the image comes from the `workspaces.image` column default. The `workspaces.repo_url` column exists but is never written or read by any code path, so a new workspace starts with an **empty** `/home/dev/project`.
 3. The orchestrator creates a container + volume; the workspace agent starts inside it.
-3a. You populate the project yourself, from a terminal in the workspace (`git clone …` into `/home/dev/project`). Cloning on creation is not implemented.
-4. Enter the workspace: file tree on the left, editor in the middle, terminals at the bottom, presence and activity on the right.
-5. Open a terminal; it is a real login shell as user `dev` in `/home/dev/project`.
-6. Edit files; run the app; see it in a preview tab (preview proxying is a later milestone).
-7. Invite a collaborator by email; they sign in and land in the same workspace.
-8. Both see the same terminals, the same files, and who is doing what.
+3a. You populate the project yourself, by asking your Claude (step 4) to clone or create it in `/home/dev/project`. Cloning on creation is not implemented.
+4. Enter the workspace: the middle is one Claude terminal per member who can write, side by side (since session 12, D-045; there is no file tree, editor or shell tab any more), with people, activity and tasks on the right.
+5. Your Claude starts by itself: Claude Code, interactive, in `/home/dev/project`, as your own Unix user. The first time, it asks you to sign in with your own Claude account, right in the terminal; the sign-in is private to you and kept on the workspace volume.
+6. Type or paste prompts into it; it edits files and runs the app (`!` runs a shell command); see it in a preview tab (preview proxying is a later milestone).
+7. Add a collaborator by email (they need an account); they sign in and land in the same workspace, with a Claude of their own.
+8. Both see both Claudes live, working on the same files, and who is doing what; each can type only into their own.
 9. Start an AI agent on a task; the agent appears as a participant, and everyone can follow its run log in the task (since D-039 a run is no longer a terminal session, so it cannot be attached to live).
 10. Start a second agent on a different task with a different provider; the coordinator gives each its own worktree and warns on overlapping scopes.
 11. Finished tasks are integrated one at a time after checks pass; humans approve when the workspace policy says so.

@@ -220,11 +220,19 @@ export async function addMember(
   });
 }
 
-/** Owner only. The owner cannot be removed. */
+/**
+ * Owner only. The owner cannot be removed. The member's Claude terminal is ended as
+ * well: nobody could type into it any more, and it would go on working in the
+ * project under their account.
+ */
 export async function removeMember(deps: WorkspaceServiceDeps, actorId: string, workspaceId: string, userId: string): Promise<void> {
   await requireMembership(deps.db, workspaceId, actorId, 'owner');
   const workspace = await loadWorkspace(deps.db, workspaceId);
   if (userId === workspace.ownerId) throw new ForbiddenError('the owner cannot be removed');
   await deps.db.delete(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)));
   await recordEvent(deps.db, { workspaceId, actorKind: 'user', actorId, type: 'member.removed', payload: { userId } });
+  const removed = await deps.db.query.users.findFirst({ where: eq(users.id, userId), columns: { agentUid: true } });
+  // Best effort: a stopped workspace has no terminal, and an unreachable orchestrator
+  // must not undo the removal. The terminal then ends with the container.
+  if (removed) await deps.orchestrator.stopAgentTerminal(workspaceId, removed.agentUid).catch(() => undefined);
 }

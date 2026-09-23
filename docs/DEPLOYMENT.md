@@ -321,8 +321,10 @@ does not affect the deployment already running. Until this is done §6 fails wit
 
 1. `curl https://orchestrator.noteawork.com/healthz` → `{"ok":true,"service":"notea-orchestrator"}`.
 2. `curl -H 'Authorization: Bearer <ORCHESTRATOR_API_KEY>' https://orchestrator.noteawork.com/workspaces` → `{"workspaces":[]}`; without the header → 401.
-3. Open the Vercel URL, sign in with the account from step 6, create a workspace, open a
-   terminal (`whoami` → `dev`), save a file from the editor.
+3. Open the Vercel URL, sign in with the account from step 6 and open a workspace: your
+   Claude terminal starts by itself and, the first time, asks you to sign in with your own
+   Claude account in the terminal (pick the subscription login, open the link or press `c`
+   to copy it, paste the code back). A second member sees it live, marked "Watching".
 4. **Settings → AI & Claude → Connect** a credential, then **Check** it against the running
    workspace: the CLI must report `authenticated (oauth_token)` for a subscription token or
    `authenticated (api_key …)` for an API key.
@@ -370,6 +372,7 @@ remains a working fallback — the orchestrator then reaches containers through 
     for seven days, a deleted workspace; they do not cover losing the server. For that, turn
     on Hetzner's server backups or copy `/var/backups/notea` somewhere else.
 - **Image upgrade:** `git pull && npm ci && npm run build:image`, then stop/start each workspace from the UI (the orchestrator recreates the container on the new image, keeping the volume).
+- **Code upgrade without an image change** (as `notea` in `/opt/notea-workspace/app`): `git pull && npm ci`, then `systemctl restart notea-orchestrator notea-worker` as root. Restarting the orchestrator ends every member's Claude terminal, because Docker cannot re-attach an exec's stream (D-045); each member's open page starts a fresh one within seconds, and `/resume` inside it picks up a conversation. Warn the members first.
 - **Logs:** `journalctl -u notea-orchestrator -u notea-worker -f`. They carry ids only, never tokens.
 - **Rotation:** changing `AGENT_TOKEN_SECRET` requires recreating containers; changing `CREDENTIALS_KEY` makes stored credentials undecryptable (members reconnect them).
 

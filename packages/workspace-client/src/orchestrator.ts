@@ -3,6 +3,8 @@ import type {
   AgentExecRequest,
   AgentExecResult,
   CreateWorkspaceRuntimeRequest,
+  IssueAgentTerminalTokenRequest,
+  IssueAgentTerminalTokenResponse,
   IssueConnectTokenRequest,
   IssueConnectTokenResponse,
   WorkspaceRuntimeInfo,
@@ -67,6 +69,16 @@ export class OrchestratorClient {
 
   issueConnectToken(request: IssueConnectTokenRequest): Promise<IssueConnectTokenResponse> {
     return this.call('POST', '/connect-tokens', request);
+  }
+
+  /** A token for watching (and, for its own member, typing into) a member's Claude terminal. */
+  issueAgentTerminalToken(request: IssueAgentTerminalTokenRequest): Promise<IssueAgentTerminalTokenResponse> {
+    return this.call('POST', '/agent-terminal-tokens', request);
+  }
+
+  /** Ends a member's Claude terminal in a workspace, if one runs. */
+  stopAgentTerminal(workspaceId: string, uid: number): Promise<void> {
+    return this.call('POST', `/workspaces/${encodeURIComponent(workspaceId)}/agent-terminals/${encodeURIComponent(String(uid))}/stop`);
   }
 
   /** Runs a command in a workspace container as `request.uid` and buffers its output. */
