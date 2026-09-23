@@ -31,8 +31,8 @@ and every service came back on its own. Hardened the same day:
   networking intact.
 
 **Production accounts (Neon), 2026-09-23.** `andrej@notea.mk` (Andrej, agent uid 20002)
-owns the `notea` workspace; `niche@notea.mk` (Niche, 20003) was created in session 11 and is
-not yet a member of any workspace (the owner adds the account from the workspace's People tab). An earlier
+owns the `notea` workspace; `niche@notea.mk` (Niche, 20003) was created in session 11 and is an
+editor in `notea`. An earlier
 account, `nikolovskiandrej1998@gmail.com` (20001, from 2026-09-16), belongs to no workspace.
 Passwords are set with `npm run create-user -w @notea/web -- <email> <name> <password>`,
 run as `notea` in `/opt/notea-workspace/app` (it reads the Neon URL from `.env` and updates
