@@ -114,9 +114,13 @@ Without `DATABASE_URL`, the db/web/worker database suites skip themselves. Witho
 18. **A failed action still remounts the workspace page.** Errors from server actions travel as `?error=` in a redirect (`withError`), and any redirect remounts the page, so an unsaved edit is lost when, say, adding a member fails. Successful actions no longer do this (D-043); moving the forms to `useActionState` would cover failures too.
 19. **No `loading.tsx` on the workspace route.** A Suspense boundary there made a page opened in a background tab render twice (React batches Suspense reveals on `requestAnimationFrame`, which background tabs do not run), leaving a hidden copy with duplicate ids. The workspace link shows a spinner while the page loads instead (D-044).
 
-## Deployment status (session 7)
+## Deployment status (updated in session 11)
 
-**DEPLOYED (control plane only).** https://noteaworkspace-web.vercel.app — `apps/web` on Vercel, Postgres on Neon.
+**DEPLOYED, both halves.** The control plane is https://noteaworkspace-web.vercel.app (`apps/web` on Vercel, Postgres on Neon). The runtime host is `orchestrator.noteawork.com` (`178.105.211.58`, Hetzner, Ubuntu 26.04.1, 4 vCPU / 7.6 GB, 4 GB swap): Docker 29.8.1, Node 24.21, Caddy in front with a Let's Encrypt certificate (valid to 2026-12-21, renewed by Caddy), and `notea-orchestrator` + `notea-worker` as enabled systemd units under the `notea` service account, configured from `/opt/notea-workspace/app/.env` (mode 600) against the Neon database.
+
+The host was set up on 2026-09-22, after the "nothing is installed" list below was written, and the docs never recorded it. Session 11 found it running and in use: the web app had created a workspace on it (`POST /workspaces` 201 through Caddy) and the owner had opened it twice, so Vercel's `ORCHESTRATOR_URL`/`ORCHESTRATOR_PUBLIC_URL` point at the host and the shared API key matches. It ran `a4a42c3`, from before session 10. Session 11 upgraded it (see Session 11 below). The list below is kept as the record of what was missing on 2026-09-22.
+
+Earlier record (session 7): control plane only.
 
 Repository: https://github.com/nikolovskiandrej/noteaworkspace (branch `main`).
 
@@ -131,10 +135,10 @@ What is ready: the production `next build` passes (7 routes), `docs/DEPLOYMENT.m
 What is missing (the list below replaces session 7's, which was written before the Vercel
 deployment happened and then contradicted the paragraph above it):
 
-- **The Linux host exists but nothing is installed on it.** `178.105.211.58` (Hetzner; reverse DNS `…clients.your-server.de`) answers on port 22 with `OpenSSH_10.2p1` — newer than Ubuntu 24.04's 9.6p1, so check `lsb_release -a` before following §5 step 1. Ports **80, 443 and 4100 are closed**; 80 and 443 must be opened in the Hetzner Cloud Firewall before Caddy can obtain a certificate. Everything in `DEPLOYMENT.md` §5 is still to do.
+- ~~**The Linux host exists but nothing is installed on it.**~~ **Done (2026-09-22; found and upgraded in session 11).** Everything in `DEPLOYMENT.md` §5 is in place; 80 and 443 are open and served by Caddy, 4100 is bound to 127.0.0.1 only.
 - ~~**No domain.**~~ **Done (2026-09-22).** `orchestrator.noteawork.com` → `178.105.211.58`, verified resolving. DNS is Cloudflare, **DNS-only (not proxied)**, which is what Caddy's ACME and the browser's direct `wss://` both need — do not turn the orange cloud on.
-- **The two shared secrets have not been read out of Vercel.** `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` exist on the deployed project but are not on the development machine, and the host must reuse those exact values (`DEPLOYMENT.md` §2). The Vercel CLI is still not installed or authenticated here, so this needs the owner.
-- **Vercel still points at the placeholder orchestrator.** `ORCHESTRATOR_URL`/`ORCHESTRATOR_PUBLIC_URL` are `https://orchestrator.example.com` and must become `https://orchestrator.noteawork.com`; §5 step 9, and a **redeploy** is required for the change to take effect.
+- ~~**The two shared secrets have not been read out of Vercel.**~~ **Done.** The host's `.env` holds `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY`; the API key provably matches Vercel's (the web app's calls succeed). `CREDENTIALS_KEY` could not be checked from here: it only shows when a stored credential is used by a run on the host.
+- ~~**Vercel still points at the placeholder orchestrator.**~~ **Done.** The web app reaches `https://orchestrator.noteawork.com` (evidence above).
 
 ## Session 11 (2026-09-23): frontend polish, and defects found in the browser
 
@@ -171,7 +175,14 @@ deployment happened and then contradicted the paragraph above it):
 
 How the browser pass avoided real data: the web app and the worker ran against a throw-away `notea_ui` database, the browser reused the existing development session (no password was typed), and the workspace it drove was a throw-away container, deleted through the new dialog at the end. The automation tab ran in a background window, where Chrome does not run `requestAnimationFrame`; animations were checked at their end states rather than watched frame by frame.
 
-Not changed: the orchestrator, the worker, the agent runtimes, the protocol and the database schema. The deployment still needs the owner (Deployment status above).
+Not changed by the frontend work: the orchestrator, the agent runtimes, the protocol and the database schema.
+
+**Runtime host (later in session 11).** Asked to set up the Hetzner host, the session found it already set up (Deployment status above) but running `a4a42c3`, without session 10's fixes. What was done, over the root SSH key already in place:
+- The worker's reaper warned `fatal: not a git repository` every minute for the host's workspace, whose project folder is still empty: it ran `git worktree list` in a directory that is not a repository. It now checks `GitWorktrees.isRepository()` first and skips such a workspace (`3c7382f`, with a regression test that fails on the old code; suite 195 passed / 3 skipped).
+- The host pulled `3c7382f` through its read-only deploy key, ran `npm ci`, rebuilt `notea/workspace:dev` (`4ddc3b08` → `5d026856`; its `agent.cjs` is session 10's, byte-identical to the local build) and restarted both units. The worker drained cleanly (`shutting down`, nothing in flight). The one workspace, idle and empty, was stopped and started through the orchestrator's API so it was recreated on the new image with its volume kept.
+- Verified from outside: `https://orchestrator.noteawork.com/healthz` answers, the REST API returns 401 without the key, HTTP redirects to HTTPS, and the scanners' probes (`/.env`, `/.git/config`, `/secrets.json`) get 404. The reaper has made passes on the new worker with no warning.
+- Not done: the reboot the host has been waiting for since a kernel and libc update (`/var/run/reboot-required`; `7.0.0-31` is installed, `7.0.0-30` runs). Claude Code's permission check refused a remote reboot, so it is left to the owner. All three services are enabled and come back on their own.
+- Left as recommendations, not changed, because they are the owner's access path: `PasswordAuthentication yes` in sshd (no account can use it today, as root is key-only and `notea` has no password), and `ufw` inactive (only 22, 80 and 443 listen publicly; 4100 is bound to 127.0.0.1).
 
 ## Session 10 (2026-09-22): whole-project bug review
 

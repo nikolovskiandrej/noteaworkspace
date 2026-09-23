@@ -1,11 +1,25 @@
 # Notea Workspace — Deployment
 
-Last updated: 2026-09-20 (session 8). Status: **the control plane is deployed; the runtime
-host is not.** `apps/web` is live on Vercel against a Neon Postgres and the repository is on
-GitHub, so §3 and §4 are a record of what was done, not work to repeat. §5 (the Linux host)
-is the outstanding half, and until it exists nothing past sign-in works. What is verified in
-the software itself is in `CURRENT_STATE.md`: the production `next build`, the full test
-suite, the Docker end-to-end suite and the two-member agent flow.
+Last updated: 2026-09-23 (session 11). Status: **both halves are deployed.** `apps/web` is
+live on Vercel against a Neon Postgres, and the runtime host `orchestrator.noteawork.com`
+(§5) runs Caddy, the orchestrator, the worker and Docker; it was set up on 2026-09-22 and
+upgraded to current code in session 11. §3–§5 are now a record of what was done, and §7 is
+how to operate it. The host still waits for one reboot (below). What is verified in the
+software itself is in `CURRENT_STATE.md`.
+
+**Host state, 2026-09-23.** Ubuntu 26.04.1, 4 vCPU / 7.6 GB, 4 GB swap. Docker 29.8.1,
+Node 24.21, Caddy with a Let's Encrypt certificate (valid to 2026-12-21, renewed by Caddy),
+the `notea` service account (in `docker`), `/opt/notea-workspace/app` at `3c7382f` pulled
+through a read-only deploy key, `.env` mode 600 against the Neon database, and
+`notea-orchestrator` + `notea-worker` enabled. Checked from outside: `/healthz` answers over
+TLS, the REST API returns 401 without the key, HTTP redirects to HTTPS, and probes for
+`/.env` or `/.git/config` get 404. Pending:
+- **A reboot**: a kernel (`7.0.0-31`) and libc update are installed and
+  `/var/run/reboot-required` is set. `systemctl reboot` when no workspace is in use; every
+  service comes back on its own.
+- **Hardening, recommended**: sshd still allows password logins (no account can use one
+  today, since root is key-only and `notea` has none); set `PasswordAuthentication no`. `ufw`
+  is inactive; only 22, 80 and 443 listen publicly, with 4100 bound to 127.0.0.1.
 
 **Before §5, read §2's COPY note.** `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` already
 exist on the Vercel project; the host must reuse those exact values.

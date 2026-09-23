@@ -8,10 +8,11 @@ Self-hosted, browser-based shared development workspace: one persistent Linux co
 
 ## 2. Current goal
 
-1. **Deploy the runtime host.** This is the only thing standing between the project and its actual purpose: two people in different places working in one workspace. The control plane is already live on Vercel; what is missing is a Linux host running the orchestrator, the worker and Docker (`DEPLOYMENT.md` §5). Since session 8 the development machine is itself Linux, so the gap between "works here" and "works on the host" is now small.
-2. **A credential for Niche**, so the second member can run agents on her own account. The mechanism is built and proven for one member; it has never been exercised with two credential owners at once.
-3. Codex and Gemini authenticated runs, which need an OpenAI and a Google credential and have their own parsers.
-4. M2 leftovers: file watcher (`fs.changed` for terminal-side edits), invites by link.
+1. ~~**Deploy the runtime host.**~~ **Done**: both halves are live. The host (`orchestrator.noteawork.com`) was set up on 2026-09-22 and upgraded to current code in session 11; the one thing it still waits for is a reboot to load an installed kernel and libc update (§20).
+2. **Use it for real, remotely**: sign in on the Vercel URL, create or open a workspace, connect a credential under AI & Claude, **Check** it, and run a task on the host. Only the owner can do this (it needs the account password), and it is the first end-to-end use of the deployed system beyond opening a workspace.
+3. **A credential for Niche**, so the second member can run agents on her own account. The mechanism is built and proven for one member; it has never been exercised with two credential owners at once.
+4. Codex and Gemini authenticated runs, which need an OpenAI and a Google credential and have their own parsers.
+5. M2 leftovers: file watcher (`fs.changed` for terminal-side edits), invites by link.
 
 ## 3. Current architecture
 
@@ -69,13 +70,13 @@ None open. Session 11 found three by driving the UI in Chrome and fixed them: **
 
 ## 20. Blockers
 
-**One, and it is only about deployment.**
+**None.** The deployment blocker is closed: both halves are live (below). One piece of host maintenance is pending: `/var/run/reboot-required` has been set since a kernel (`7.0.0-31`) and libc update was installed. Run `ssh root@178.105.211.58 systemctl reboot` when nobody is using a workspace; all three services (Caddy, orchestrator, worker) are enabled and come back on their own, and running workspace containers restart with Docker.
 
 The credential blocker is **closed**: a Claude subscription token is stored for `andrej@notea.mk` and has now driven two authenticated runs end to end — the first on Windows (§23b) and a second on Linux after the migration (§23a). The stored credential survived the move and needed no re-authentication. Anthropic is covered; **OpenAI and Google still have no credential**, so Codex and Gemini runs still stop at their own auth checks — a missing credential, not a defect. **Niche has no credential either**, so the two-member-two-accounts case is built and unit-tested but has never run for real.
 
-**The control plane is deployed; the runtime host is not.** `apps/web` is live at https://noteaworkspace-web.vercel.app against a Neon Postgres, and the repository is at https://github.com/nikolovskiandrej/noteaworkspace. What is still missing is a **Linux host running the orchestrator, the worker and Docker** — without it a workspace cannot start, so terminals, the editor and agent tasks are unavailable on the deployed URL. The domain and the machine now exist — `orchestrator.noteawork.com` resolves to `178.105.211.58` (Hetzner), DNS-only on Cloudflare, SSH reachable, nothing installed yet, 80/443 still closed. `ORCHESTRATOR_URL` and `ORCHESTRATOR_PUBLIC_URL` are the placeholder `https://orchestrator.example.com` and must become `https://orchestrator.noteawork.com` **and be redeployed** (`DEPLOYMENT.md` §5 step 9) before anything beyond sign-in works.
+**Both halves are deployed.** `apps/web` is live at https://noteaworkspace-web.vercel.app against a Neon Postgres, and the runtime host `orchestrator.noteawork.com` (`178.105.211.58`, Hetzner, Ubuntu 26.04.1) runs Caddy with Let's Encrypt, the orchestrator, the worker and Docker (`CURRENT_STATE.md` → Deployment status). The host was set up on 2026-09-22 and the docs missed it; session 11 found it working (the web app had created a workspace on it and the owner had opened it), then upgraded it from `a4a42c3` to `3c7382f` and rebuilt the workspace image. The repository is https://github.com/nikolovskiandrej/noteaworkspace; the host pulls it with a read-only deploy key.
 
-Session 8 prepared everything that could be prepared without the host (`CURRENT_STATE.md` → Session 8). Two things still need the owner's accounts: a domain, and reading `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` out of the Vercel project — the host must reuse those exact values, and generating new ones breaks the deployed control plane.
+Worth doing on the host, and left to the owner because it is the way into the server: set `PasswordAuthentication no` in sshd (root is key-only already, and no other account has a password) and enable `ufw` for 22, 80 and 443.
 
 ## 21. Tested / 22. Not tested
 
@@ -89,7 +90,7 @@ No longer untested as of session 8: `network` connect mode, and an authenticated
 
 **The browser UI has one design system, and three defects found by using it in Chrome are fixed.** Nothing was left uncommitted by session 10, so the session started from a clean `main`. The UI now has tokens, IBM Plex, status pills, menus and a real delete dialog, restrained motion and a phone/tablet layout (D-044); no functionality, route, API or form field changed. The fixes: same-page server actions no longer remount the page, which had discarded unsaved editor text whenever someone queued a task, saved the policy or added a member (D-043); Chrome no longer fills the Notea login into the provider-token form; a terminal no longer takes the keyboard from the editor when it attaches; the task list keeps a stable order. Suite 186 → **194** passed / 3 skipped, typecheck clean, production build 7 routes, 3 Docker e2e green. Every screen and action was driven in real Chrome against the dev server and the production build, on throw-away data. The details are in `CURRENT_STATE.md` → Session 11.
 
-State left behind: the work is `ae339c4` on `main`, pushed to GitHub, which also redeploys the control plane on Vercel. New web dependencies: `motion`, `lucide-react`, `@fontsource-variable/ibm-plex-sans`, `@fontsource/ibm-plex-mono` and the explicit `@lezer/highlight`; `@codemirror/theme-one-dark` was removed. The demo workspace's container already runs the current image (checked by hash), so the session-10 advice to recreate it no longer applies. The throw-away `notea_ui` database and workspace used for the browser pass were removed; no service is left running.
+State left behind: the work is on `main` and pushed to GitHub, which also redeploys the control plane on Vercel (`ae339c4` the UI; `3c7382f` a reaper fix found on the production host). The runtime host runs `3c7382f` with a rebuilt `notea/workspace:dev`; its one workspace was recreated on that image. The host still needs a reboot for an installed kernel and libc update (§20). New web dependencies: `motion`, `lucide-react`, `@fontsource-variable/ibm-plex-sans`, `@fontsource/ibm-plex-mono` and the explicit `@lezer/highlight`; `@codemirror/theme-one-dark` was removed. The demo workspace's container already runs the current image (checked by hash), so the session-10 advice to recreate it no longer applies. The throw-away `notea_ui` database and workspace used for the browser pass were removed; no service is left running.
 
 ### Session 10 (previous)
 
@@ -156,7 +157,7 @@ The `demo-project` workspace exists in the dev database (`ebc7f427-…`); its co
 **Done in session 8 — the project runs on Linux and step 2 below is closed.** The environment was migrated, re-verified, and the pipeline driven end to end again under a real Claude subscription over `network` connect mode. The authenticated fixtures session 7 asked for are now in `packages/agents/test/runtimes.test.ts`.
 
 The next steps are now:
-1. **Deploy the runtime host** — `DEPLOYMENT.md` §5 (a Linux host for the orchestrator, worker, Docker and containers), then point `ORCHESTRATOR_URL` and `ORCHESTRATOR_PUBLIC_URL` away from the placeholder `https://orchestrator.example.com`. §3 (GitHub) and §4 (Vercel) are already done. This is the step that turns a single-machine setup into the product.
+1. ~~**Deploy the runtime host**~~ — **done** (set up 2026-09-22, upgraded in session 11). Remaining on it: the pending reboot, and the sshd/ufw hardening in §20. Upgrading it later is `DEPLOYMENT.md` §7: `git pull`, `npm ci`, `npm run build:image` as `notea`, restart both units, then stop and start each workspace.
 2. ~~**Capture fixtures**~~ — **done in session 8.** Real authenticated `thinking`/`tool_use`/`tool_result`/`result` records from claude-code 2.1.272 are pinned in `packages/agents/test/runtimes.test.ts`, together with `rate_limit_event`, a record type no earlier fixture had seen.
 3. **Give Niche a credential** and run two members' agents at once. Everything for it exists and is unit-tested; it has never run for real, and it is the product's central claim.
 4. **Codex and Gemini** — repeat the authenticated run for each once a credential exists.
