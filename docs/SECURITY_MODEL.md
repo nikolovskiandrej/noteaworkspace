@@ -134,7 +134,7 @@ the product — but no longer each other's credentials.
 5. Audit log per workspace; tamper-evident.
 6. Abuse detection (mining, spam), resource alarms.
 7. Agent policy: tool allow-lists, per-task permission modes, mandatory review for risky scopes.
-8. Backups and restore drills; deletion guarantees.
+8. Backups and restore drills: nightly on-host backups and one restore drill exist since 2026-09-23 (`DEPLOYMENT.md` §7); off-host copies and regular drills do not. Deletion guarantees.
 
 ## 6. Operational lessons and checklist
 - **Disk exhaustion is a real failure mode.** During development a full host disk turned Docker's VM read-only, killed Postgres queries and the worker, and broke image builds. Give the Docker data root and volumes dedicated space, monitor free space, prune build cache regularly, and keep the database on a disk with headroom.

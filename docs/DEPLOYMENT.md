@@ -29,6 +29,9 @@ and every service came back on its own. Hardened the same day:
   with `ufw` active and all its rules, Docker's jumps still ahead of ufw's in `FORWARD`, sshd
   still key-only, every service running and the workspace container healthy with its
   networking intact.
+- **Nightly backups** (since 2026-09-23): `notea-backup.timer` backs up every workspace
+  volume and the database at 03:30 Europe/Skopje into the root-only `/var/backups/notea`,
+  keeping seven nights. The first run was restored into throwaway copies and matched (§7).
 
 **Production accounts (Neon), 2026-09-23.** `andrej@notea.mk` (Andrej, agent uid 20002)
 owns the `notea` workspace; `niche@notea.mk` (Niche, 20003) was created in session 11 and is an
@@ -99,7 +102,7 @@ Read them out of Vercel first (Project → Settings → Environment Variables �
 | `CREDENTIALS_KEY` | 64 hex chars; encrypts stored provider credentials; must equal the worker's value | **set — copy to the host** |
 | `AUTH_URL` | optional; the public URL of the web app if Vercel's auto-detection is not right | your domain |
 
-### Orchestrator (VPS, `/opt/notea-workspace/.env`)
+### Orchestrator (VPS, `/opt/notea-workspace/app/.env`)
 
 | Variable | Value | Generate? |
 |---|---|---|
@@ -336,7 +339,36 @@ remains a working fallback — the orchestrator then reaches containers through 
 
 ## 7. Operations
 
-- **Backups:** `pg_dump` the database; `docker run --rm -v notea-ws-<id>-home:/v -v $PWD:/b alpine tar czf /b/<id>.tgz -C /v .` per workspace volume.
+- **Backups (nightly since 2026-09-23).** `notea-backup.timer` runs
+  `/usr/local/sbin/notea-backup` (`infra/deploy/notea-backup.sh`) at 03:30 Europe/Skopje, and
+  at the next boot if the host was off then. Each run writes `/var/backups/notea/<UTC time>/`:
+  one `notea-ws-<id>-home.tar.zst` per workspace (the project, the task worktrees and the agent
+  homes, without `node_modules`, `.cache` and `.npm`) and `database.dump` (`pg_dump -Fc` of the
+  Neon database, including the `neon_auth` schema Neon created, which Notea does not use). The
+  newest seven are kept, and a night with less than 10 GB free is skipped rather than fill the
+  disk. Everything is root-only (700/600): the dump holds password hashes and encrypted
+  credentials. `pg_dump` gets the password through libpq's environment, never a command line.
+  - *Install or update* (as root in `/opt/notea-workspace/app`, after the `git pull`):
+    `apt-get install postgresql-client`, then
+    `install -m 0755 infra/deploy/notea-backup.sh /usr/local/sbin/notea-backup`,
+    `install -m 0644 infra/deploy/notea-backup.{service,timer} /etc/systemd/system/` and
+    `systemctl daemon-reload && systemctl enable --now notea-backup.timer`.
+  - *Check:* `systemctl list-timers notea-backup.timer`, `journalctl -u notea-backup`,
+    `ls /var/backups/notea`. Take one now with `systemctl start notea-backup`.
+  - *Restore a workspace:* stop it in the UI and take a fresh backup, then
+    `mp=$(docker volume inspect -f '{{.Mountpoint}}' notea-ws-<id>-home)`,
+    `find "$mp" -mindepth 1 -delete` and
+    `tar --zstd --numeric-owner -xpf /var/backups/notea/<time>/notea-ws-<id>-home.tar.zst -C "$mp"`;
+    start it and reinstall dependencies (`npm ci`), which the backup leaves out.
+  - *Restore the database:* within Neon's history window, Neon's own restore is simpler.
+    Otherwise `pg_restore --no-owner --no-privileges -d <URL of an empty database> database.dump`,
+    check it, and point `DATABASE_URL` (Vercel and the host) at it.
+  - *Verified 2026-09-23:* the first run was restored into a temporary directory (every path,
+    owner, mode and file matched the live volume) and into a throwaway Postgres 18 container
+    with no network (0 errors; the users, the workspace and both members present).
+  - *Limit:* the backups share the server's disk. They cover deleted files, bad changes and,
+    for seven days, a deleted workspace; they do not cover losing the server. For that, turn
+    on Hetzner's server backups or copy `/var/backups/notea` somewhere else.
 - **Image upgrade:** `git pull && npm ci && npm run build:image`, then stop/start each workspace from the UI (the orchestrator recreates the container on the new image, keeping the volume).
 - **Logs:** `journalctl -u notea-orchestrator -u notea-worker -f`. They carry ids only, never tokens.
 - **Rotation:** changing `AGENT_TOKEN_SECRET` requires recreating containers; changing `CREDENTIALS_KEY` makes stored credentials undecryptable (members reconnect them).

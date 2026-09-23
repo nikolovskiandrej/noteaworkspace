@@ -76,7 +76,7 @@ The credential blocker is **closed**: a Claude subscription token is stored for 
 
 **Both halves are deployed.** `apps/web` is live at https://noteaworkspace-web.vercel.app against a Neon Postgres, and the runtime host `orchestrator.noteawork.com` (`178.105.211.58`, Hetzner, Ubuntu 26.04.1) runs Caddy with Let's Encrypt, the orchestrator, the worker and Docker (`CURRENT_STATE.md` → Deployment status). The host was set up on 2026-09-22 and the docs missed it; session 11 found it working (the web app had created a workspace on it and the owner had opened it), then upgraded it from `a4a42c3` to `3c7382f` and rebuilt the workspace image. The repository is https://github.com/nikolovskiandrej/noteaworkspace; the host pulls it with a read-only deploy key.
 
-The host is hardened (2026-09-23): SSH is key-only (`/etc/ssh/sshd_config.d/10-notea-hardening.conf`) and `ufw` allows only 22, 80, 443/tcp and 443/udp (`DEPLOYMENT.md`, host state). Both changes were applied with an automatic rollback that was cancelled only after a fresh key login, HTTPS and the containers' networking had been verified, and both survived a test reboot. Production accounts: `andrej@notea.mk` (owner of `notea`) and `niche@notea.mk` (`DEPLOYMENT.md`, host state).
+The host is hardened (2026-09-23): SSH is key-only (`/etc/ssh/sshd_config.d/10-notea-hardening.conf`) and `ufw` allows only 22, 80, 443/tcp and 443/udp (`DEPLOYMENT.md`, host state). Both changes were applied with an automatic rollback that was cancelled only after a fresh key login, HTTPS and the containers' networking had been verified, and both survived a test reboot. It backs itself up nightly: every workspace volume and the database, seven nights kept in `/var/backups/notea` on the same disk, restore-tested once (`DEPLOYMENT.md` §7). Production accounts: `andrej@notea.mk` (owner of `notea`) and `niche@notea.mk` (`DEPLOYMENT.md`, host state).
 
 ## 21. Tested / 22. Not tested
 
@@ -164,6 +164,7 @@ The next steps are now:
 5. ~~**A browser pass on Linux.**~~ — **done**: headless Chrome in session 10, and every screen and action in real Chrome (Claude in Chrome) in session 11.
 6. M2 leftovers: file watcher for terminal-side edits, invites by link.
 7. **Errors as action state.** Failed actions still report through a `?error=` redirect, which remounts the page (CURRENT_STATE debt 18); moving the workspace forms to `useActionState` would keep unsaved editor text on failures too.
+8. **An off-host copy of the backups.** The nightly backups share the server's disk (`DEPLOYMENT.md` §7): Hetzner's server backups, or copying `/var/backups/notea` elsewhere, would cover losing the server.
 
 ## 24b. How the first authenticated run was done (session 7)
 
