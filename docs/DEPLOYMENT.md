@@ -25,6 +25,18 @@ and every service came back on its own. Hardened the same day:
   jumps still come first in `FORWARD`, so containers keep their network: the host reaches the
   agent, containers reach GitHub, the Anthropic API and DNS, and the reaper's passes go
   through. To open another port later: `ufw allow <port>/tcp`.
+- **Both survive a reboot** (tested 2026-09-23): after `systemctl reboot` the host came back
+  with `ufw` active and all its rules, Docker's jumps still ahead of ufw's in `FORWARD`, sshd
+  still key-only, every service running and the workspace container healthy with its
+  networking intact.
+
+**Production accounts (Neon), 2026-09-23.** `andrej@notea.mk` (Andrej, agent uid 20002)
+owns the `notea` workspace; `niche@notea.mk` (Niche, 20003) was created in session 11 and is
+not yet a member of any workspace (the owner adds the account from the workspace's People tab). An earlier
+account, `nikolovskiandrej1998@gmail.com` (20001, from 2026-09-16), belongs to no workspace.
+Passwords are set with `npm run create-user -w @notea/web -- <email> <name> <password>`,
+run as `notea` in `/opt/notea-workspace/app` (it reads the Neon URL from `.env` and updates
+an existing account in place); they are never written to this repository.
 
 **Before §5, read §2's COPY note.** `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY` already
 exist on the Vercel project; the host must reuse those exact values.

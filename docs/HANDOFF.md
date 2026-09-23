@@ -10,7 +10,7 @@ Self-hosted, browser-based shared development workspace: one persistent Linux co
 
 1. ~~**Deploy the runtime host.**~~ **Done**: both halves are live. The host (`orchestrator.noteawork.com`) was set up on 2026-09-22, upgraded to current code in session 11, and rebooted onto its updated kernel (`7.0.0-31`) the same day; everything came back on its own.
 2. **Use it for real, remotely**: sign in on the Vercel URL, create or open a workspace, connect a credential under AI & Claude, **Check** it, and run a task on the host. Only the owner can do this (it needs the account password), and it is the first end-to-end use of the deployed system beyond opening a workspace.
-3. **A credential for Niche**, so the second member can run agents on her own account. The mechanism is built and proven for one member; it has never been exercised with two credential owners at once.
+3. **A credential for Niche** (she has a production account, `niche@notea.mk`, since session 11, not yet a member of a workspace), so the second member can run agents on her own account. The mechanism is built and proven for one member; it has never been exercised with two credential owners at once.
 4. Codex and Gemini authenticated runs, which need an OpenAI and a Google credential and have their own parsers.
 5. M2 leftovers: file watcher (`fs.changed` for terminal-side edits), invites by link.
 
@@ -76,7 +76,7 @@ The credential blocker is **closed**: a Claude subscription token is stored for 
 
 **Both halves are deployed.** `apps/web` is live at https://noteaworkspace-web.vercel.app against a Neon Postgres, and the runtime host `orchestrator.noteawork.com` (`178.105.211.58`, Hetzner, Ubuntu 26.04.1) runs Caddy with Let's Encrypt, the orchestrator, the worker and Docker (`CURRENT_STATE.md` → Deployment status). The host was set up on 2026-09-22 and the docs missed it; session 11 found it working (the web app had created a workspace on it and the owner had opened it), then upgraded it from `a4a42c3` to `3c7382f` and rebuilt the workspace image. The repository is https://github.com/nikolovskiandrej/noteaworkspace; the host pulls it with a read-only deploy key.
 
-The host is hardened (2026-09-23): SSH is key-only (`/etc/ssh/sshd_config.d/10-notea-hardening.conf`) and `ufw` allows only 22, 80, 443/tcp and 443/udp (`DEPLOYMENT.md`, host state). Both changes were applied with an automatic rollback that was cancelled only after a fresh key login, HTTPS and the containers' networking had been verified.
+The host is hardened (2026-09-23): SSH is key-only (`/etc/ssh/sshd_config.d/10-notea-hardening.conf`) and `ufw` allows only 22, 80, 443/tcp and 443/udp (`DEPLOYMENT.md`, host state). Both changes were applied with an automatic rollback that was cancelled only after a fresh key login, HTTPS and the containers' networking had been verified, and both survived a test reboot. Production accounts: `andrej@notea.mk` (owner of `notea`) and `niche@notea.mk` (`DEPLOYMENT.md`, host state).
 
 ## 21. Tested / 22. Not tested
 
