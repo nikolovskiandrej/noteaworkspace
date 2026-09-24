@@ -18,10 +18,10 @@ export interface ClaudeCodeRuntimeOptions {
 
 /**
  * Claude Code CLI in headless mode (`claude -p … --output-format stream-json`).
- * Flags verified against claude-code 2.1.272 (`--max-budget-usd` exists, there is
- * no `--max-turns`). The JSON-lines protocol is parsed defensively: unknown records
- * become log events so a CLI upgrade degrades to "less structure", not failure.
- * stdin is redirected from /dev/null so the CLI never waits for terminal input.
+ * Flags verified against claude-code 2.1.272 and 2.1.281 (`--max-budget-usd` exists,
+ * there is no `--max-turns`). The JSON-lines protocol is parsed defensively: unknown
+ * records become log events so a CLI upgrade degrades to "less structure", not
+ * failure. stdin is redirected from /dev/null so the CLI never waits for terminal input.
  */
 export class ClaudeCodeRuntime implements AgentRuntime {
   readonly id = 'claude-code-cli' as const;

@@ -35,8 +35,10 @@ RUN userdel -r node 2>/dev/null || true \
 
 # AI coding agent CLIs (pinned). Users log in from a workspace terminal, or the
 # worker injects an API key per run. Drop a line here to slim the image.
+# The members' Claude terminals never self-update (DISABLE_AUTOUPDATER), so this pin
+# also decides which models their /model offers: Opus 5.5 needs 2.1.280 or later.
 RUN npm install -g --no-audit --no-fund \
-      @anthropic-ai/claude-code@2.1.272 \
+      @anthropic-ai/claude-code@2.1.281 \
       @openai/codex@0.154.0 \
       @google/gemini-cli@0.59.0 \
   && npm cache clean --force \

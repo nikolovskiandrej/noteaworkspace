@@ -211,7 +211,7 @@ describe('claude auth status', () => {
     JSON.stringify({ loggedIn: true, apiProvider: 'firstParty', configDirectory: '/home/dev/.notea/agents/20003', ...extra });
 
   it('reads the authentication mode the CLI reports', () => {
-    // Fixtures captured from claude-code 2.1.272 in the workspace image.
+    // Fixtures captured from claude-code 2.1.272 in the workspace image; 2.1.281 reports the same.
     expect(parseClaudeAuthStatus('{"loggedIn":false,"authMethod":"none"}')).toMatchObject({ loggedIn: false, authMethod: 'none' });
     expect(parseClaudeAuthStatus(statusJson({ authMethod: 'oauth_token' }))).toMatchObject({ authMethod: 'oauth_token' });
     expect(parseClaudeAuthStatus(statusJson({ authMethod: 'api_key', apiKeySource: 'ANTHROPIC_API_KEY' }))).toMatchObject({

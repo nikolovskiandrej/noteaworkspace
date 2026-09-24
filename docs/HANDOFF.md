@@ -1,6 +1,6 @@
 # Notea Workspace — Handoff
 
-Written 2026-09-15, updated at the end of session 12 (the workspace page became each member's own Claude terminal, side by side; D-045). Session 11 gave the UI its design system, session 10 reviewed the whole project (17 fixes), session 9 prepared the deployment and session 8 migrated development from Windows 11 to Ubuntu 26.04. Self-contained; the conversation is not needed. **Work in `~/ClaudeProjects/notea-workspace`** (§28), not in the backup. Read `CURRENT_STATE.md` next, then `ARCHITECTURE.md`, `AGENT_SYSTEM.md`, `DECISIONS.md`, `SECURITY_MODEL.md`, `DEPLOYMENT.md`.
+Written 2026-09-15, updated in session 13 (the workspace image's Claude Code moved to 2.1.281, so the Claude terminals offer Opus 5.5). Session 12 made the workspace page each member's own Claude terminal, side by side (D-045); session 11 gave the UI its design system, session 10 reviewed the whole project (17 fixes), session 9 prepared the deployment and session 8 migrated development from Windows 11 to Ubuntu 26.04. Self-contained; the conversation is not needed. **Work in `~/ClaudeProjects/notea-workspace`** (§28), not in the backup. Read `CURRENT_STATE.md` next, then `ARCHITECTURE.md`, `AGENT_SYSTEM.md`, `DECISIONS.md`, `SECURITY_MODEL.md`, `DEPLOYMENT.md`.
 
 ## 1. Product summary
 
@@ -86,13 +86,19 @@ Not tested: **a completed Claude sign-in in a member's terminal, and two members
 
 No longer untested as of session 8: `network` connect mode, and an authenticated agent run on Linux. As of session 10: the browser UI on Linux (headless Chrome, 9 checks, `CURRENT_STATE.md` → Session 10), and an agent run longer than 10 minutes through the real orchestrator. As of session 11: every screen and action in real Chrome (Claude in Chrome), with the production build, and the layout at phone and tablet widths.
 
-## 23. Exact current state (session 12)
+## 23. Exact current state (session 13)
+
+**The workspace image carries Claude Code 2.1.281 instead of 2.1.272, so the members' Claude terminals offer Opus 5.5.** The terminals never self-update, and 2.1.272 predates Opus 5.5, which needs 2.1.280 or later. Opus 5.5 also joined the model catalog for background tasks. Verified on the rebuilt image: `/model` lists Opus 5.5 (as the default), `claude auth status --json` and the headless task records parse exactly as before, suite 240 passed / 4 skipped, 4 Docker e2e, production build 8 routes. Details, and the deploy steps (image rebuild on the host, then stop and start `notea`; no service restart), are in `CURRENT_STATE.md` → Session 13.
+
+State left behind: on `main` and pushed; **the host's image is not rebuilt yet**, so production terminals still run Claude Code 2.1.272 until the steps below are done. The local `notea/workspace:dev` is already rebuilt with 2.1.281.
+
+### Session 12 (previous)
 
 **The middle of the workspace page is one Claude terminal per member who can write**, side by side on the same project: "Andrej's Claude" and "Niche's Claude" in `notea`. Each runs as its member's own uid with the login they make in it, everyone watches all of them live, and only its member can type (D-045, `ARCHITECTURE.md` §4b). The file tree, the editor and the shell tabs are gone; People, Activity and Tasks stay on the right. Suite 195 → **240** passed / 4 skipped, typecheck clean, production build 8 routes, 4 Docker e2e green six runs in a row, both members' views driven in headless Chrome on throw-away data. Details: `CURRENT_STATE.md` → Session 12.
 
 State left behind: `69f29f1` is on `main`, deployed by Vercel, and running on the host (pulled, `npm ci`, both units restarted; no image rebuild was needed). Verified there without starting anything: the token route wants the key, Caddy carries the new WebSocket path, and a real token for `notea` reaches the container lookup (the workspace is stopped). Nobody has opened a Claude terminal in production yet. The throw-away `notea_ui` database, workspace and container used for the browser pass were removed; no local service is left running.
 
-### Session 11 (previous)
+### Session 11
 
 **The browser UI has one design system, and three defects found by using it in Chrome are fixed.** Nothing was left uncommitted by session 10, so the session started from a clean `main`. The UI now has tokens, IBM Plex, status pills, menus and a real delete dialog, restrained motion and a phone/tablet layout (D-044); no functionality, route, API or form field changed. The fixes: same-page server actions no longer remount the page, which had discarded unsaved editor text whenever someone queued a task, saved the policy or added a member (D-043); Chrome no longer fills the Notea login into the provider-token form; a terminal no longer takes the keyboard from the editor when it attaches; the task list keeps a stable order. Suite 186 → **194** passed / 3 skipped, typecheck clean, production build 7 routes, 3 Docker e2e green. Every screen and action was driven in real Chrome against the dev server and the production build, on throw-away data. The details are in `CURRENT_STATE.md` → Session 11.
 
@@ -161,6 +167,8 @@ The `demo-project` workspace exists in the dev database (`ebc7f427-…`); its co
 ## 24. Exact next step
 
 **Done in session 8 — the project runs on Linux and step 2 below is closed.** The environment was migrated, re-verified, and the pipeline driven end to end again under a real Claude subscription over `network` connect mode. The authenticated fixtures session 7 asked for are now in `packages/agents/test/runtimes.test.ts`.
+
+First, if §23 still says session 13 is not deployed: push `main`, then on the host run `git pull && npm run build:image` as `notea`, and stop and start `notea` from the UI (warn the members first: stopping it ends their Claude terminals).
 
 The next steps are now:
 0. **Sign in to both Claude terminals in production and use them** (§2 items 2 and 3). Watch for what D-045 lists as its cost: an orchestrator deploy ends every terminal (warn the members first), and background tasks integrate only when the Claudes' work is committed.

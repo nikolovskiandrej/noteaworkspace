@@ -11,6 +11,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     credentialEnv: 'ANTHROPIC_API_KEY',
     models: [
       { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', capabilities: { tools: true, contextTokens: 1_000_000 } },
+      { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', capabilities: { tools: true, contextTokens: 1_000_000 } },
       { id: 'claude-opus-5', label: 'Claude Opus 5', capabilities: { tools: true, contextTokens: 1_000_000 } },
       { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', capabilities: { tools: true, contextTokens: 1_000_000 } },
       { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', capabilities: { tools: true, contextTokens: 200_000 } },
@@ -38,10 +39,10 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
  *
  * Both are mechanisms the vendor's own CLI documents and implements; Notea invents
  * nothing. Verified against the binaries baked into the workspace image
- * (claude-code 2.1.272): `claude auth status --json` reports `authMethod` as
- * `oauth_token` when CLAUDE_CODE_OAUTH_TOKEN is set and `api_key` when
- * ANTHROPIC_API_KEY is, and the OAuth token wins when both are present — which is
- * exactly why Notea never sets both (see {@link credentialEnv}).
+ * (claude-code 2.1.272, and again on 2.1.281): `claude auth status --json` reports
+ * `authMethod` as `oauth_token` when CLAUDE_CODE_OAUTH_TOKEN is set and `api_key`
+ * when ANTHROPIC_API_KEY is, and the OAuth token wins when both are present — which
+ * is exactly why Notea never sets both (see {@link credentialEnv}).
  */
 export const AUTH_MODES: Record<ProviderId, AuthModeInfo[]> = {
   anthropic: [

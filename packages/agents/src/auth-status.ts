@@ -1,7 +1,7 @@
 import type { AuthMode } from './types';
 
 /**
- * What `claude auth status --json` reports (claude-code 2.1.272).
+ * What `claude auth status --json` reports (claude-code 2.1.272; unchanged in 2.1.281).
  *
  * The CLI is the authority on how it authenticated, so Notea asks it rather than
  * asserting. Observed values, verified against the binary in the workspace image:

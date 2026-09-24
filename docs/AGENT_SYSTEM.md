@@ -54,7 +54,7 @@ did not spawn, and is not worth reopening the credential exposure for.
 | `codex-cli` | `codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox [-m X] "$(cat brief.md)" < /dev/null` | `parseCodexLine`: `item.completed/started` → message / tool_call / file_changed, `turn.completed` → `usage`, `error`/`turn.failed` → error logs |
 | `gemini-cli` | `gemini --approval-mode yolo [-m X] -p "$(cat brief.md)" < /dev/null` | text lines → log events; the command line first seeds `$HOME/.gemini/settings.json` (if absent) with folder trust disabled, because Gemini silently downgrades approval mode in untrusted folders. It is `$HOME` of the run itself — the member's private `~/.notea/agents/<uid>` — since the agent uid cannot write `/home/dev` and the CLI never reads it |
 
-`--max-turns` does **not** exist in claude-code 2.1.272; the spend cap is `--max-budget-usd`, fed from the task's `maxBudgetUsd`. The `max_turns` column is retained but unused.
+`--max-turns` does **not** exist in claude-code 2.1.272 or 2.1.281 (the image's version since session 13); the spend cap is `--max-budget-usd`, fed from the task's `maxBudgetUsd`. The `max_turns` column is retained but unused.
 
 **Two `finished` events are normal.** The `result` record produces one, and process exit produces another; the worker keeps the last, so the exit code is authoritative. A CLI can report a *success-shaped* result that is actually a failure — claude-code emits `{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}` and then exits 1 — so the parser honours `is_error`, a non-zero exit overrides a success, and the exit-time event carries the earlier record's summary forward (`state.summary`) so the failure keeps its explanation instead of surfacing as a bare "failed". Fixtures from that real output are in `packages/agents/test/runtimes.test.ts`.
 
@@ -85,7 +85,7 @@ fails the run rather than borrowing another member's credential.
 
 Exactly one is ever set, and `conflictingEnvNames` is cleared inside the container:
 claude-code prefers the OAuth token when both are present, so setting both would let a
-subscription quietly become metered usage. Verified against claude-code 2.1.272:
+subscription quietly become metered usage. Verified against claude-code 2.1.272 and 2.1.281:
 `claude auth status --json` reports `authMethod` `oauth_token`, `api_key` (with
 `apiKeySource`) or `none`, and **Settings → AI & Claude** can run exactly that inside a
 container under the member's own uid and show what the CLI says. Notea implements no

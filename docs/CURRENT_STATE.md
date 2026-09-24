@@ -1,6 +1,6 @@
 # Notea Workspace — Current State
 
-Last updated: 2026-09-24, end of session 12 (the workspace page became each member's own Claude terminal, side by side; D-045). Session 11 (2026-09-23) polished the frontend and fixed three defects found in the browser; session 10 (2026-09-22) reviewed every source file and fixed 17 defects; session 9 prepared the deployment; session 8 (2026-09-19) migrated development from Windows 11 to Ubuntu 26.04. All are recorded below. Update this file whenever reality changes.
+Last updated: 2026-09-24, session 13 (the workspace image's Claude Code moved from 2.1.272 to 2.1.281, so the members' Claude terminals offer Opus 5.5). Session 12 (2026-09-24) made the workspace page each member's own Claude terminal, side by side (D-045); session 11 (2026-09-23) polished the frontend and fixed three defects found in the browser; session 10 (2026-09-22) reviewed every source file and fixed 17 defects; session 9 prepared the deployment; session 8 (2026-09-19) migrated development from Windows 11 to Ubuntu 26.04. All are recorded below. Update this file whenever reality changes.
 
 ## One-line status
 
@@ -122,7 +122,7 @@ Without `DATABASE_URL`, the db/web/worker database suites skip themselves. Witho
 
 ## Deployment status (updated in session 11)
 
-**DEPLOYED, both halves, running session 12's `69f29f1`** (the host since 2026-09-24; see Session 12). The control plane is https://noteaworkspace-web.vercel.app (`apps/web` on Vercel, Postgres on Neon). The runtime host is `orchestrator.noteawork.com` (`178.105.211.58`, Hetzner, Ubuntu 26.04.1, 4 vCPU / 7.6 GB, 4 GB swap): Docker 29.8.1, Node 24.21, Caddy in front with a Let's Encrypt certificate (valid to 2026-12-21, renewed by Caddy), and `notea-orchestrator` + `notea-worker` as enabled systemd units under the `notea` service account, configured from `/opt/notea-workspace/app/.env` (mode 600) against the Neon database.
+**DEPLOYED, both halves, running session 12's `69f29f1`** (the host since 2026-09-24; see Session 12). Session 13's image change (Claude Code 2.1.281) is not deployed yet; its steps are under Session 13. The control plane is https://noteaworkspace-web.vercel.app (`apps/web` on Vercel, Postgres on Neon). The runtime host is `orchestrator.noteawork.com` (`178.105.211.58`, Hetzner, Ubuntu 26.04.1, 4 vCPU / 7.6 GB, 4 GB swap): Docker 29.8.1, Node 24.21, Caddy in front with a Let's Encrypt certificate (valid to 2026-12-21, renewed by Caddy), and `notea-orchestrator` + `notea-worker` as enabled systemd units under the `notea` service account, configured from `/opt/notea-workspace/app/.env` (mode 600) against the Neon database.
 
 The host was set up on 2026-09-22, after the "nothing is installed" list below was written, and the docs never recorded it. Session 11 found it running and in use: the web app had created a workspace on it (`POST /workspaces` 201 through Caddy) and the owner had opened it twice, so Vercel's `ORCHESTRATOR_URL`/`ORCHESTRATOR_PUBLIC_URL` point at the host and the shared API key matches. It ran `a4a42c3`, from before session 10. Session 11 upgraded it (see Session 11 below). The list below is kept as the record of what was missing on 2026-09-22.
 
@@ -146,6 +146,34 @@ deployment happened and then contradicted the paragraph above it):
 - ~~**The two shared secrets have not been read out of Vercel.**~~ **Done.** The host's `.env` holds `ORCHESTRATOR_API_KEY` and `CREDENTIALS_KEY`; the API key provably matches Vercel's (the web app's calls succeed). `CREDENTIALS_KEY` could not be checked from here: it only shows when a stored credential is used by a run on the host.
 - ~~**Vercel still points at the placeholder orchestrator.**~~ **Done.** The web app reaches `https://orchestrator.noteawork.com` (evidence above).
 - **Backups stay on the server.** Nightly since 2026-09-23 and restore-tested (`DEPLOYMENT.md` §7), but on the same disk as the data, so they do not survive losing the host.
+
+## Session 13 (2026-09-24): Claude Code 2.1.281 in the workspace image, for Opus 5.5
+
+**Asked for.** The owner found Opus 5.5 missing from the Claude terminals.
+
+**Cause.** A member's terminal runs the CLI baked into the workspace image, pinned at `@anthropic-ai/claude-code@2.1.272`, and never updates itself: the terminal sets `DISABLE_AUTOUPDATER=1`, and the member's uid could not replace `/usr/local` anyway. 2.1.272 predates Opus 5.5 (`claude-opus-5-5` does not occur in its binary), and the model list 2.1.281 carries marks Opus 5.5 `min_claude_code_version: "2.1.280"`. npm's `stable` tag (2.1.273) does not have it either; `latest` (2.1.281) does.
+
+**What changed.**
+- `infra/workspace-image/Dockerfile`: claude-code 2.1.272 → **2.1.281** (codex-cli and gemini-cli unchanged), with a note that this pin decides which models the terminals offer.
+- `packages/agents/src/providers.ts`: `claude-opus-5-5` ("Claude Opus 5.5", 1M context) joins the catalog, so the Tasks panel can pick it for background runs.
+- Comments and `AGENT_SYSTEM.md` lines that said "verified against 2.1.272" now say what was re-verified on 2.1.281.
+
+**Verified.**
+
+| Check | Result |
+|---|---|
+| `npm run build:image` | OK: `notea/workspace:dev` 2.01 GB with claude-code 2.1.281, codex-cli 0.154.0, gemini-cli 0.59.0 |
+| `/model` in the new image | An interactive `claude` as uid 20003 in a throw-away container (no network, throw-away HOME, a fake API key) shows "Claude Code v2.1.281 · Opus 5.5 (1M context)", and `/model` lists Default (Opus 5.5, 1M context), Opus (Opus 5.5), Fable 5.1, Sonnet 5 and Haiku 4.5. The `opus` alias resolves to `claude-opus-5-5`. A subscription login shows its own plan's list, in which Opus 5.5 needs 2.1.280 or later. |
+| `claude auth status --json` | The same fields and values as the 2.1.272 fixtures with no credential, an OAuth token or an API key. With both set it still reports `oauth_token`, and now also names `apiKeySource` (a case Notea never creates). |
+| Headless task command | Notea's own command line with `--model claude-opus-5-5 --max-budget-usd 1`: the init record reports `claude-opus-5-5`; without a login the CLI emits the same three records as the 2.1.272 fixture and exits 1, and `parseClaudeStreamLine` turns them into log, message, usage and finished `failed` "Not logged in · Please run /login" |
+| `npm run typecheck` | OK across all 9 workspaces |
+| `npm test` with `DATABASE_URL` (throw-away `notea_test`) | OK: 240 passed, 4 skipped (unchanged) |
+| `npm run test:e2e -w @notea/orchestrator` | OK: 4 passed, on the new image |
+| `next build` (production) | OK, 8 routes |
+
+Not verified: a completed sign-in (it needs a member's own Claude account).
+
+**Deploying it.** Only the image changed for the terminals: on the host, as `notea` in `/opt/notea-workspace/app`, `git pull && npm run build:image` (the lockfile did not change, so `npm ci` is not needed), then stop and start `notea` from the UI, which recreates its container on the new image and keeps the volume (`DEPLOYMENT.md` §7). Neither service needs a restart: the orchestrator does not load `@notea/agents`, and the worker never reads the model catalog. Stopping the workspace ends its Claude terminals; `/resume` picks a conversation up again. Pushing to `main` redeploys the web app on Vercel, which puts Opus 5.5 in the Tasks panel. The local demo workspace's container still runs the old image until it is next started through the orchestrator. On Docker's containerd image store, rebuilding the tag drops the old image from `docker images` at once, while a container still running on it is unaffected.
 
 ## Session 12 (2026-09-23 – 2026-09-24): each member's own Claude terminal
 

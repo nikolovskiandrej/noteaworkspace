@@ -9,7 +9,8 @@ import { GenericCliRuntime } from './generic-cli';
  * Runtime registry. Command lines were verified against the CLIs baked into the
  * workspace image (claude-code 2.1.272, codex-cli 0.154.0, gemini-cli 0.59.0) by
  * running each through the full task pipeline (they fail cleanly without
- * credentials). Authenticated runs still need a user credential.
+ * credentials). Authenticated runs still need a user credential. The image now
+ * carries claude-code 2.1.281, whose command line was re-checked directly.
  */
 export function createRuntimeRegistry(): Map<RuntimeId, AgentRuntime> {
   const runtimes: AgentRuntime[] = [
