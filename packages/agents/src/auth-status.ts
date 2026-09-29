@@ -1,7 +1,7 @@
 import type { AuthMode } from './types';
 
 /**
- * What `claude auth status --json` reports (claude-code 2.1.272; unchanged in 2.1.281).
+ * What `claude auth status --json` reports (claude-code 2.1.272; unchanged in 2.1.281 and 2.1.284, except where noted).
  *
  * The CLI is the authority on how it authenticated, so Notea asks it rather than
  * asserting. Observed values, verified against the binary in the workspace image:
@@ -10,9 +10,10 @@ import type { AuthMode } from './types';
  *   {"loggedIn":true,"authMethod":"oauth_token",...}                 CLAUDE_CODE_OAUTH_TOKEN
  *   {"loggedIn":true,"authMethod":"api_key","apiKeySource":"ANTHROPIC_API_KEY",...}
  *
- * When both variables are present the CLI reports `oauth_token`: the subscription
- * wins. Notea never sets both, and clears the one it is not using, so the report and
- * the intent cannot drift apart.
+ * When both variables are present the CLI picks one, and which one depends on its
+ * version: `oauth_token` in 2.1.272 and 2.1.281, `api_key` in 2.1.284. Notea never sets
+ * both, and unsets the one it is not using, so the report and the intent cannot drift
+ * apart whichever CLI the image carries.
  */
 export interface ClaudeAuthStatus {
   loggedIn: boolean;

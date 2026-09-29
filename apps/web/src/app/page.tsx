@@ -24,7 +24,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   return (
     <div className="flex min-h-full flex-col">
       <TopBar userName={session.user.name ?? session.user.email ?? 'you'} userEmail={session.user.email} />
-      <main className="page-enter mx-auto w-full max-w-4xl flex-1 px-4 py-8 sm:px-6 sm:py-12">
+      <main className="page-enter mx-auto w-full max-w-4xl flex-1 px-4 py-8 sm:px-6 sm:py-12 min-[1100px]:pb-32">
         <WorkspacesHeader defaultOpen={items.length === 0}>
           <div>
             <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-fg">Workspaces</h1>

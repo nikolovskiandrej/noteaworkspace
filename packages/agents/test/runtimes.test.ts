@@ -339,8 +339,8 @@ describe('ClaudeCodeRuntime', () => {
    * Records captured from claude-code 2.1.272 running headless without a credential
    * on 2026-09-15. The CLI reports the failure as a *success-shaped* result carrying
    * `is_error: true`, then exits 1 — the shape that previously made the run land in
-   * `needs_review` as if the agent had done the work. 2.1.281 emits the same three
-   * records and exit code (re-captured 2026-09-24).
+   * `needs_review` as if the agent had done the work. 2.1.281 and 2.1.284 emit the same
+   * three records and exit code (re-captured 2026-09-24 and 2026-09-29).
    */
   it('reports an unauthenticated run as failed and keeps the CLI explanation', async () => {
     const client = new WorkspaceClient({ url: `ws://127.0.0.1:${port}/ws?token=${TOKEN}`, WebSocketImpl: identifyingWebSocket() });

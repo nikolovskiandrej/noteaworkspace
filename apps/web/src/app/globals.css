@@ -3,32 +3,34 @@
 /*
  * Notea design tokens.
  *
- * Black, off-white and dark green. The neutrals carry a trace of the green, so the
- * surfaces and the brand colour read as one family rather than a blue-grey theme with
- * a green button on it. Dark green is for fills (primary actions, selection); mint is
- * the same hue lifted until it can be read as text on black.
+ * Taken from the brand: the logo's deep green (#084c2c) and its cream paper (#f8f9f3),
+ * and the teal that the ribbon mascot glows with. The workspace stays dark, because it
+ * is mostly terminals, but the neutrals lean forest green instead of grey and the text
+ * is the logo's cream. Deep green is for fills (primary actions, selection); the teal
+ * mint is the same family lifted until it can be read as text on black.
  */
 @theme {
   --font-sans: 'IBM Plex Sans Variable', 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
 
-  --color-canvas: #090b0a;
-  --color-panel: #0d100e;
-  --color-raised: #131714;
-  --color-hover: #1a1f1c;
-  --color-selected: #202722;
-  --color-line: #1c221e;
-  --color-line-strong: #2b332e;
+  --color-canvas: #070d0a;
+  --color-panel: #0b130f;
+  --color-raised: #111b16;
+  --color-hover: #182520;
+  --color-selected: #1e2e26;
+  --color-line: #1a2721;
+  --color-line-strong: #2a3b32;
 
-  --color-fg: #ecede6;
-  --color-fg-muted: #a8aea9;
-  --color-fg-subtle: #80877f;
-  --color-fg-faint: #545b56;
+  --color-fg: #f3f4ec;
+  --color-fg-muted: #aab4ac;
+  --color-fg-subtle: #82908a;
+  --color-fg-faint: #56655d;
 
-  --color-brand: #1e6a48;
-  --color-brand-hover: #247a53;
-  --color-brand-edge: #2d8a60;
-  --color-accent: #7cc4a0;
+  --color-brand: #0f5a36;
+  --color-brand-hover: #146d42;
+  --color-brand-edge: #23885a;
+  --color-accent: #63d9b8;
+  --color-cream: #f8f9f3;
 
   --color-warn: #dcae5a;
   --color-danger: #ec7c73;
@@ -63,6 +65,17 @@
     background: var(--color-canvas);
   }
 
+  /* The logo's green glows in from the top-left, where the logo sits, and the mascot's
+     teal from the bottom-right, where it sits. Panels are opaque and cover this; it
+     shows on the bare canvas (sign-in, the workspace list, settings). */
+  body {
+    background:
+      radial-gradient(64rem 34rem at 0% -10%, rgb(15 90 54 / 0.3), transparent 70%),
+      radial-gradient(46rem 30rem at 100% 110%, rgb(0 176 154 / 0.11), transparent 70%),
+      var(--color-canvas);
+    background-attachment: fixed;
+  }
+
   body {
     color: var(--color-fg);
     font-family: var(--font-sans);
@@ -74,13 +87,13 @@
   }
 
   ::selection {
-    background: rgb(124 196 160 / 0.28);
+    background: rgb(99 217 184 / 0.26);
     color: var(--color-fg);
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: #2b332e transparent;
+    scrollbar-color: #2a3b32 transparent;
   }
 
   button:not(:disabled),
@@ -191,7 +204,7 @@
   }
   .btn-secondary:hover:not(:disabled) {
     background: var(--color-hover);
-    border-color: #3a443e;
+    border-color: #385046;
   }
 
   .btn-ghost {
@@ -243,7 +256,7 @@
     width: 100%;
     height: 2.125rem;
     padding: 0 0.75rem;
-    border: 1px solid #333c36;
+    border: 1px solid #2f4238;
     border-radius: 6px;
     background: var(--color-canvas);
     color: var(--color-fg);
@@ -258,13 +271,13 @@
     opacity: 1;
   }
   .input:hover:not(:disabled) {
-    border-color: #414b44;
+    border-color: #3d5549;
   }
   .input:focus,
   .input:focus-visible {
     outline: none;
-    border-color: rgb(124 196 160 / 0.7);
-    box-shadow: 0 0 0 3px rgb(124 196 160 / 0.14);
+    border-color: rgb(99 217 184 / 0.7);
+    box-shadow: 0 0 0 3px rgb(99 217 184 / 0.14);
   }
   .input:disabled {
     opacity: 0.5;
@@ -336,7 +349,7 @@
     color: var(--color-accent);
   }
   .tone-ok {
-    color: #9dcfb4;
+    color: #a6dcc5;
   }
   .tone-warn {
     color: var(--color-warn);
@@ -449,18 +462,18 @@
     }
   }
   .dialog::backdrop {
-    background: rgb(3 5 4 / 0);
+    background: rgb(2 7 4 / 0);
     transition:
       background-color 220ms var(--ease-out),
       overlay 280ms allow-discrete,
       display 280ms allow-discrete;
   }
   .dialog[open]::backdrop {
-    background: rgb(3 5 4 / 0.64);
+    background: rgb(2 7 4 / 0.64);
   }
   @starting-style {
     .dialog[open]::backdrop {
-      background: rgb(3 5 4 / 0);
+      background: rgb(2 7 4 / 0);
     }
   }
 
@@ -514,6 +527,50 @@
     line-height: 1.125rem;
     color: var(--color-fg-subtle);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* The logo: the mark on the logo's own cream, so it reads the same on any surface.
+     Sized by --logo-size. */
+  .logo-tile {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: var(--logo-size, 1.75rem);
+    height: var(--logo-size, 1.75rem);
+    border-radius: 26%;
+    background: var(--color-cream);
+    box-shadow:
+      inset 0 0 0 1px rgb(255 255 255 / 0.6),
+      0 6px 20px -8px rgb(35 136 90 / 0.7);
+  }
+  .logo-tile > img {
+    display: block;
+    width: 66%;
+    height: auto;
+  }
+
+  /* The ribbon mascot, peeking in from the bottom-right corner. Decorative: it never
+     takes a click, and it is hidden below 1100px wide (phones, tablets, and windows too
+     narrow to spare the corner). The workspace sidebar reserves a strip for it
+     (`min-[1100px]:pb-28`) so it never sits on anything readable. */
+  .mascot {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: 10.5rem;
+    height: auto;
+    pointer-events: none;
+    user-select: none;
+    filter: drop-shadow(0 0 22px rgb(0 176 154 / 0.2));
+    animation:
+      mascot-in 900ms var(--ease-out) 500ms both,
+      mascot-bob 7s var(--ease-in-out) 1.4s infinite;
+  }
+  @media (max-width: 1099.98px), (max-height: 520px) {
+    .mascot {
+      display: none;
+    }
   }
 
   .kbd {
@@ -573,6 +630,19 @@
   100% {
     transform: scale(2.6);
     opacity: 0;
+  }
+}
+
+@keyframes mascot-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+
+@keyframes mascot-bob {
+  50% {
+    transform: translateY(-4px);
   }
 }
 

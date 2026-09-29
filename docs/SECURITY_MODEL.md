@@ -106,9 +106,10 @@ carries its mode (`provider_credentials.auth_mode`):
 | `subscription` | `CLAUDE_CODE_OAUTH_TOKEN` | the member runs `claude setup-token` themselves | the member's Claude plan; no API charges |
 | `api_key` | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | a key from the provider's console | pay-as-you-go on the key owner's account |
 
-Notea never sets both. The CLI prefers the OAuth token when both are present, so
-setting both would let a subscription silently become metered usage; the run clears
-the modes it is not using. `claude auth status --json` is the authority on what
+Notea never sets both. Which one the CLI prefers when both are present depends on its
+version (the OAuth token through 2.1.281, the API key in 2.1.284), so setting both could
+let a subscription silently become metered usage; the run clears the modes it is not
+using. `claude auth status --json` is the authority on what
 actually happened, and **Settings → AI & Claude** can run it inside a real container
 under the member's own uid and show the answer. Notea implements no authentication
 flow of its own: both mechanisms are the vendor CLI's, and no browser session, cookie

@@ -18,7 +18,7 @@ export interface ClaudeCodeRuntimeOptions {
 
 /**
  * Claude Code CLI in headless mode (`claude -p … --output-format stream-json`).
- * Flags verified against claude-code 2.1.272 and 2.1.281 (`--max-budget-usd` exists,
+ * Flags verified against claude-code 2.1.272, 2.1.281 and 2.1.284 (`--max-budget-usd` exists,
  * there is no `--max-turns`). The JSON-lines protocol is parsed defensively: unknown
  * records become log events so a CLI upgrade degrades to "less structure", not
  * failure. stdin is redirected from /dev/null so the CLI never waits for terminal input.

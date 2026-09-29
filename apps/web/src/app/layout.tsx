@@ -7,6 +7,7 @@ import '@fontsource/ibm-plex-mono/400-italic.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import '@fontsource/ibm-plex-mono/600.css';
 import './globals.css';
+import { Mascot } from '@/components/mascot';
 import { MotionProvider } from '@/components/motion-provider';
 
 export const metadata: Metadata = {
@@ -15,7 +16,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#090b0a',
+  themeColor: '#070d0a',
   colorScheme: 'dark',
 };
 
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body className="h-full">
         <MotionProvider>{children}</MotionProvider>
+        <Mascot />
       </body>
     </html>
   );

@@ -58,7 +58,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         </main>
         <aside
           aria-label="Tasks"
-          className="flex min-h-0 flex-col border-t border-line bg-panel max-lg:flex-1 lg:w-80 lg:flex-none lg:border-l lg:border-t-0 xl:w-[22rem]"
+          className="flex min-h-0 flex-col border-t border-line bg-panel max-lg:flex-1 lg:w-80 lg:flex-none lg:border-l lg:border-t-0 xl:w-[22rem] min-[1100px]:pb-28"
         >
           <div className="pane-header">
             <h2 className="pane-title">Tasks</h2>
@@ -127,7 +127,7 @@ function WorkspaceLayout({ workspaceId, role, members, events, currentUserId, re
         <aside
           aria-label="People, activity and tasks"
           className={cx(
-            'min-h-0 min-w-0 flex-col bg-panel lg:flex lg:w-80 lg:flex-none lg:border-l lg:border-line xl:w-[22rem]',
+            'min-h-0 min-w-0 flex-col bg-panel lg:flex lg:w-80 lg:flex-none lg:border-l lg:border-line xl:w-[22rem] min-[1100px]:pb-28',
             view === TEAM_VIEW ? 'flex flex-1' : 'hidden',
           )}
         >

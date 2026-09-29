@@ -16,7 +16,7 @@ export default async function SignInPage({
     <main className="flex min-h-full items-center justify-center px-4 py-12">
       <div className="page-enter w-full max-w-[22.5rem]">
         <div className="mb-7 flex justify-center">
-          <Wordmark />
+          <Wordmark large />
         </div>
         <div className="rounded-xl border border-line bg-panel p-6 shadow-[0_24px_64px_-32px_rgb(0_0_0/0.9)] sm:p-7">
           <h1 className="text-[20px] font-semibold tracking-[-0.015em] text-fg">Sign in</h1>

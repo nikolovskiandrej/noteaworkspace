@@ -55,7 +55,7 @@ export default async function AiSettingsPage({ searchParams }: { searchParams: P
         <Crumb>AI &amp; Claude</Crumb>
       </TopBar>
 
-      <main className="page-enter mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:px-6 sm:py-12">
+      <main className="page-enter mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:px-6 sm:py-12 min-[1100px]:pb-32">
         <header>
           <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-fg">Your AI connections</h1>
           <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-fg-muted">
