@@ -529,40 +529,30 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* The logo: the mark on the logo's own cream, so it reads the same on any surface.
-     Sized by --logo-size. */
-  .logo-tile {
-    display: inline-grid;
-    flex: none;
-    place-items: center;
-    width: var(--logo-size, 1.75rem);
-    height: var(--logo-size, 1.75rem);
-    border-radius: 26%;
-    background: var(--color-cream);
-    box-shadow:
-      inset 0 0 0 1px rgb(255 255 255 / 0.6),
-      0 6px 20px -8px rgb(35 136 90 / 0.7);
-  }
-  .logo-tile > img {
+  /* The logo: the ribbon N alone, on whatever surface it sits on. Its green is the
+     logo's, lifted so it reads on black. Sized by --logo-w. */
+  .logo-mark {
     display: block;
-    width: 66%;
+    flex: none;
+    width: var(--logo-w, 1.875rem);
     height: auto;
+    filter: drop-shadow(0 2px 10px rgb(35 168 118 / 0.35));
   }
 
-  /* The ribbon mascot, peeking in from the bottom-right corner. Decorative: it never
-     takes a click, and it is hidden below 1100px wide (phones, tablets, and windows too
-     narrow to spare the corner). The workspace sidebar reserves a strip for it
-     (`min-[1100px]:pb-28`) so it never sits on anything readable. */
+  /* The ribbon mascot, hands on its head, in the bottom-right corner. Decorative: it
+     never takes a click, and it is hidden below 1100px wide (phones, tablets, and
+     windows too narrow to spare the corner). The workspace sidebar reserves a strip for
+     it (`min-[1100px]:pb-36`) so it never sits on anything readable. */
   .mascot {
     position: fixed;
-    right: 0;
+    right: -0.75rem;
     bottom: 0;
     z-index: 30;
-    width: 10.5rem;
+    width: 15rem;
     height: auto;
     pointer-events: none;
     user-select: none;
-    filter: drop-shadow(0 0 22px rgb(0 176 154 / 0.2));
+    filter: drop-shadow(0 0 26px rgb(0 176 154 / 0.22));
     animation:
       mascot-in 900ms var(--ease-out) 500ms both,
       mascot-bob 7s var(--ease-in-out) 1.4s infinite;
