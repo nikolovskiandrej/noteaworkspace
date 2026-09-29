@@ -9,9 +9,9 @@ software itself is in `CURRENT_STATE.md`.
 
 **Host state, 2026-09-23.** Ubuntu 26.04.1, 4 vCPU / 7.6 GB, 4 GB swap. Docker 29.8.1,
 Node 24.21, Caddy with a Let's Encrypt certificate (valid to 2026-12-21, renewed by Caddy),
-the `notea` service account (in `docker`), `/opt/notea-workspace/app` at `e40461a` (session 13) pulled
-through a read-only deploy key, `notea/workspace:dev` rebuilt from it (Claude Code 2.1.281; the
-`notea` workspace recreated on it in session 14), `.env` mode 600 against the Neon database, and
+the `notea` service account (in `docker`), `/opt/notea-workspace/app` at `457212d` (session 16) pulled
+through a read-only deploy key, `notea/workspace:dev` rebuilt from it (Claude Code 2.1.284; the
+`notea` workspace recreated on it on 2026-09-29), `.env` mode 600 against the Neon database, and
 `notea-orchestrator` + `notea-worker` enabled. Checked from outside: `/healthz` answers over
 TLS, the REST API returns 401 without the key, HTTP redirects to HTTPS, and probes for
 `/.env` or `/.git/config` get 404. The host was rebooted onto kernel `7.0.0-31` the same day,
