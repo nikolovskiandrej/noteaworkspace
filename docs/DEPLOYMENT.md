@@ -101,7 +101,7 @@ Read them out of Vercel first (Project → Settings → Environment Variables �
 | `ORCHESTRATOR_PUBLIC_URL` | same URL; browsers derive `wss://` from it for terminals | your domain |
 | `ORCHESTRATOR_API_KEY` | must equal the orchestrator's value | **set — copy to the host** |
 | `CREDENTIALS_KEY` | 64 hex chars; encrypts stored provider credentials; must equal the worker's value | **set — copy to the host** |
-| `AUTH_URL` | optional; the public URL of the web app if Vercel's auto-detection is not right | your domain |
+| `AUTH_URL` | optional; the public URL of the web app if Vercel's auto-detection is not right. If set, it must be the domain members use: `https://noteawork.com` (§4, Custom domain) | your domain |
 
 ### Orchestrator (VPS, `/opt/notea-workspace/app/.env`)
 
@@ -178,6 +178,38 @@ vercel --prod
 
 The web app will build and sign-in will work as soon as `DATABASE_URL` and `AUTH_SECRET`
 are set. Workspaces, terminals and tasks additionally need the orchestrator (§5).
+
+### Custom domain: `noteawork.com` (attached to the Vercel project on 2026-10-03; **the DNS record is still to be added**)
+
+The web app is live at `noteaworkspace-web.vercel.app` and is meant to be served from
+`noteawork.com`. It answers on any host: Auth.js has `trustHost: true`
+(`apps/web/src/auth.config.ts`), no code or response header embeds the app's own URL, and
+the orchestrator checks no `Origin` (its WebSockets are authenticated by token). So the
+move changes nothing in the repository, on the host or in the orchestrator. It is two
+dashboard settings and one variable to check:
+
+1. **Vercel**: **done 2026-10-03** (`vercel domains add noteawork.com noteaworkspace-web`,
+   team `andrej3`; the domain was already on the account). `www.noteawork.com` was not
+   added; if wanted, add it to the project set to redirect to the apex.
+2. **Cloudflare** (the zone's DNS, where `orchestrator` already lives): **to do.** Add
+   `A  noteawork.com  76.76.21.21` (the record Vercel asks for), **DNS only (grey cloud)**,
+   as `orchestrator` is: Vercel issues the certificate itself and recommends not proxying the
+   record. (Vercel's other option is to move the zone's nameservers to Vercel, which would
+   take `orchestrator` with it; do not.) Likewise for `www` if added. The zone had no records
+   for the apex, `www`, `app` or `workspace` on 2026-10-03.
+3. **`AUTH_URL`**: checked 2026-10-03, **not set** in the Vercel project's production
+   environment (the variables are `DATABASE_URL`, `AUTH_SECRET`, `ORCHESTRATOR_URL`,
+   `ORCHESTRATOR_PUBLIC_URL`, `ORCHESTRATOR_API_KEY`, `CREDENTIALS_KEY`), so leave it unset.
+   If it is ever set, it must be `https://noteawork.com`, or sign-in redirects go back to
+   the old address.
+4. **Verify:** `curl -sI https://noteawork.com/sign-in` answers 200 with `server: Vercel`;
+   sign in, open a workspace and check that a Claude terminal attaches (it connects to
+   `orchestrator.noteawork.com`, which does not change).
+
+Consequences. Sign-in cookies belong to a host, so each member signs in once more on the
+new domain. The `vercel.app` address keeps working; the project's Domains page can redirect
+it to the apex. `ORCHESTRATOR_URL` and `ORCHESTRATOR_PUBLIC_URL` stay
+`https://orchestrator.noteawork.com`.
 
 ## 5. The Linux host (orchestrator, worker) — the outstanding half
 
@@ -322,7 +354,8 @@ does not affect the deployment already running. Until this is done §6 fails wit
 
 1. `curl https://orchestrator.noteawork.com/healthz` → `{"ok":true,"service":"notea-orchestrator"}`.
 2. `curl -H 'Authorization: Bearer <ORCHESTRATOR_API_KEY>' https://orchestrator.noteawork.com/workspaces` → `{"workspaces":[]}`; without the header → 401.
-3. Open the Vercel URL, sign in with the account from step 6 and open a workspace: your
+3. Open the web app (`https://noteawork.com` once §4's custom domain is set up, until then
+   the `vercel.app` address), sign in with the account from step 6 and open a workspace: your
    Claude terminal starts by itself and, the first time, asks you to sign in with your own
    Claude account in the terminal (pick the subscription login, open the link or press `c`
    to copy it, paste the code back). A second member sees it live, marked "Watching".
