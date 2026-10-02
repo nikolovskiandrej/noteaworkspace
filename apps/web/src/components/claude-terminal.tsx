@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentTerminalClientMessage, AgentTerminalInfo } from '@notea/protocol';
 import { AgentTerminalClient, type ConnectionState } from '@notea/workspace-client';
 import { firstName, type ClaudePane } from '@/lib/claude-panes';
+import { OWN_FONT_SIZE, WATCH_FONT, largestFittingSize } from '@/lib/terminal-fit';
 import { findKnownLinks } from '@/lib/terminal-links';
 import { Avatar } from './ui/avatar';
 import { cx } from './ui/cx';
@@ -87,7 +88,7 @@ export function ClaudeTerminal({ workspaceId, pane }: { workspaceId: string; pan
       };
       const term = new Terminal({
         cursorBlink: true,
-        fontSize: 13,
+        fontSize: OWN_FONT_SIZE,
         lineHeight: 1.2,
         fontFamily: TERMINAL_FONT_FAMILY,
         fontWeightBold: 600,
@@ -168,9 +169,34 @@ export function ClaudeTerminal({ workspaceId, pane }: { workspaceId: string; pan
         if (proposed.cols !== term.cols || proposed.rows !== term.rows) term.resize(proposed.cols, proposed.rows);
         return { cols: proposed.cols, rows: proposed.rows };
       };
-      /** A watcher's terminal has the owner's size, so Claude's layout reads as it does for them. */
+      /**
+       * A watcher's terminal has the owner's grid, so Claude's layout reads as it does for
+       * them, but not their font: it is the largest that shows the whole grid in this pane.
+       * The owner's pane fitted the grid to its size; this fits the size to the grid.
+       */
+      const fitFontToGrid = () => {
+        if (mayType) return;
+        const measure = () => {
+          const proposed = fit.proposeDimensions();
+          return proposed && Number.isFinite(proposed.cols) && Number.isFinite(proposed.rows) ? proposed : null;
+        };
+        // Not laid out (a pane hidden by the phone layout): wait until it is shown.
+        if (!measure()) return;
+        const size = largestFittingSize(WATCH_FONT, (candidate) => {
+          term.options.fontSize = candidate;
+          const room = measure();
+          return room !== null && room.cols >= term.cols && room.rows >= term.rows;
+        });
+        term.options.fontSize = size ?? WATCH_FONT.min;
+        // A grid that fits needs no scrollbars. xterm re-syncs its own scrollbar and its
+        // helper textarea on a resize or a scroll, not on a font change, so they keep the
+        // previous font's geometry and would stretch the pane's scroll area for nothing.
+        // A grid too big even for the smallest readable font scrolls instead.
+        container.style.overflow = size === null ? 'auto' : 'hidden';
+      };
       const matchPty = (cols: number, rows: number) => {
         if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
+        fitFontToGrid();
       };
       const focusIfFree = () => {
         const active = document.activeElement;
@@ -206,6 +232,7 @@ export function ClaudeTerminal({ workspaceId, pane }: { workspaceId: string; pan
               info = message.terminal;
               knownLinks = message.links;
               term.options.disableStdin = !mayType;
+              if (mayType) term.options.fontSize = OWN_FONT_SIZE;
               // RIS through the parser, so output still queued from before a reconnect
               // cannot land on top of the fresh screen; then draw the screen at the
               // size it was captured at.
@@ -250,14 +277,18 @@ export function ClaudeTerminal({ workspaceId, pane }: { workspaceId: string; pan
       });
       cleanups.push(() => dataDisposable.dispose());
 
-      // Follow the pane's size. Hidden panes (the phone layout shows one at a time)
-      // measure as nothing and are left alone until they are shown.
+      // Follow the pane's size: the owner's pty follows it, a watcher's font does. Hidden
+      // panes (the phone layout shows one at a time) measure as nothing and are left alone
+      // until they are shown.
       let timer: ReturnType<typeof setTimeout> | null = null;
       const observer = new ResizeObserver(() => {
         if (timer) clearTimeout(timer);
         timer = setTimeout(() => {
           timer = null;
-          if (!mayType) return;
+          if (!mayType) {
+            fitFontToGrid();
+            return;
+          }
           const size = fitToPane();
           if (size && info && (info.status === 'running' || info.status === 'starting') && (size.cols !== info.cols || size.rows !== info.rows)) {
             send({ type: 'resize', cols: size.cols, rows: size.rows });
@@ -331,7 +362,7 @@ export function ClaudeTerminal({ workspaceId, pane }: { workspaceId: string; pan
       {/* Clipped: xterm's measuring helpers and fractional row heights must never make the page scroll. */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div className="absolute inset-0 pb-1 pl-3 pr-1 pt-2">
-          <div ref={containerRef} className={cx('h-full w-full', !canInput && 'overflow-auto')} />
+          <div ref={containerRef} className="h-full w-full" />
         </div>
 
         {/* Only before the first connection: after that a reconnect keeps showing the

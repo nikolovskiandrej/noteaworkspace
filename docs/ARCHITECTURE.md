@@ -107,6 +107,13 @@ the pty as its controlling terminal, which is what makes resizes arrive as SIGWI
   headless xterm fed with the same output (a TUI redraws too often for a byte log to hold
   anything that scrolled past), plus the hyperlink addresses printed so far, which a
   serialized screen cannot carry and the browser finds on screen again.
+- **Size.** A pty has one grid, and its owner's pane decides it: their page fits the grid
+  to the pane at 13 px and sends the resize (the orchestrator ignores everyone else's). A
+  watcher's terminal takes that grid, so Claude's layout reads the same for everyone, and
+  draws it at the largest font from 8 to 16 px that shows all of it in its own pane
+  (`apps/web/src/lib/terminal-fit.ts`, `fitFontToGrid` in `claude-terminal.tsx`), refitted
+  when either pane changes size. Below 8 px text stops being readable, so a grid still too
+  big for a pane scrolls there instead.
 - **Lifetime.** The member's page starts it when it is not running and leaves it running
   when they go; the process survives every tab closing. It ends when its member stops it,
   exits it, leaves the workspace (`POST /workspaces/:id/agent-terminals/:uid/stop`), or
