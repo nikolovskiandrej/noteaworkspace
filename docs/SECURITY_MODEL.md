@@ -107,7 +107,7 @@ carries its mode (`provider_credentials.auth_mode`):
 | `api_key` | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | a key from the provider's console | pay-as-you-go on the key owner's account |
 
 Notea never sets both. Which one the CLI prefers when both are present depends on its
-version (the OAuth token through 2.1.281, the API key in 2.1.284), so setting both could
+version (the OAuth token through 2.1.281, the API key from 2.1.284 on, re-checked on 2.1.288), so setting both could
 let a subscription silently become metered usage; the run clears the modes it is not
 using. `claude auth status --json` is the authority on what
 actually happened, and **Settings → AI & Claude** can run it inside a real container
