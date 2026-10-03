@@ -5,21 +5,23 @@
  *
  * Taken from the brand: the logo's deep green (#084c2c) and its cream paper (#f8f9f3),
  * and the teal that the ribbon mascot glows with. The workspace stays dark, because it
- * is mostly terminals, but the neutrals lean forest green instead of grey and the text
- * is the logo's cream. Deep green is for fills (primary actions, selection); the teal
- * mint is the same family lifted until it can be read as text on black.
+ * is mostly terminals, and its background is black: the surfaces are pure black and
+ * neutral greys with no tint (D-047), and the text is the logo's cream. The brand's
+ * colour is left to the things that should stand out: deep green is for fills (primary
+ * actions), and the teal mint is the same family lifted until it can be read as text
+ * on black.
  */
 @theme {
   --font-sans: 'IBM Plex Sans Variable', 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
 
-  --color-canvas: #070d0a;
-  --color-panel: #0b130f;
-  --color-raised: #111b16;
-  --color-hover: #182520;
-  --color-selected: #1e2e26;
-  --color-line: #1a2721;
-  --color-line-strong: #2a3b32;
+  --color-canvas: #000000;
+  --color-panel: #080808;
+  --color-raised: #101010;
+  --color-hover: #181818;
+  --color-selected: #212121;
+  --color-line: #1c1c1c;
+  --color-line-strong: #2b2b2b;
 
   --color-fg: #f3f4ec;
   --color-fg-muted: #aab4ac;
@@ -59,21 +61,12 @@
     color-scheme: dark;
   }
 
+  /* Plain black behind everything: the bare canvas (sign-in, the workspace list,
+     settings) has no green wash any more (D-047). */
   html,
   body {
     height: 100%;
     background: var(--color-canvas);
-  }
-
-  /* The logo's green glows in from the top-left, where the logo sits, and the mascot's
-     teal from the bottom-right, where it sits. Panels are opaque and cover this; it
-     shows on the bare canvas (sign-in, the workspace list, settings). */
-  body {
-    background:
-      radial-gradient(64rem 34rem at 0% -10%, rgb(15 90 54 / 0.3), transparent 70%),
-      radial-gradient(46rem 30rem at 100% 110%, rgb(0 176 154 / 0.11), transparent 70%),
-      var(--color-canvas);
-    background-attachment: fixed;
   }
 
   body {
@@ -93,7 +86,7 @@
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: #2a3b32 transparent;
+    scrollbar-color: #2b2b2b transparent;
   }
 
   button:not(:disabled),
@@ -204,7 +197,7 @@
   }
   .btn-secondary:hover:not(:disabled) {
     background: var(--color-hover);
-    border-color: #385046;
+    border-color: #3a3a3a;
   }
 
   .btn-ghost {
@@ -256,7 +249,7 @@
     width: 100%;
     height: 2.125rem;
     padding: 0 0.75rem;
-    border: 1px solid #2f4238;
+    border: 1px solid #333333;
     border-radius: 6px;
     background: var(--color-canvas);
     color: var(--color-fg);
@@ -271,7 +264,7 @@
     opacity: 1;
   }
   .input:hover:not(:disabled) {
-    border-color: #3d5549;
+    border-color: #444444;
   }
   .input:focus,
   .input:focus-visible {
@@ -462,18 +455,18 @@
     }
   }
   .dialog::backdrop {
-    background: rgb(2 7 4 / 0);
+    background: rgb(0 0 0 / 0);
     transition:
       background-color 220ms var(--ease-out),
       overlay 280ms allow-discrete,
       display 280ms allow-discrete;
   }
   .dialog[open]::backdrop {
-    background: rgb(2 7 4 / 0.64);
+    background: rgb(0 0 0 / 0.64);
   }
   @starting-style {
     .dialog[open]::backdrop {
-      background: rgb(2 7 4 / 0);
+      background: rgb(0 0 0 / 0);
     }
   }
 

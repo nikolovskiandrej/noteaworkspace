@@ -1,11 +1,11 @@
-/** The terminal in the workspace palette: the canvas behind, teal-mint cursor, muted ANSI colours. */
+/** The terminal in the workspace palette: black behind, teal-mint cursor, muted ANSI colours. */
 export const TERMINAL_THEME = {
-  background: '#070d0a',
+  background: '#000000',
   foreground: '#dfe3d8',
   cursor: '#63d9b8',
-  cursorAccent: '#070d0a',
+  cursorAccent: '#000000',
   selectionBackground: 'rgba(99, 217, 184, 0.26)',
-  black: '#182520',
+  black: '#1c1c1c',
   red: '#ec7c73',
   green: '#63d9b8',
   yellow: '#dcae5a',

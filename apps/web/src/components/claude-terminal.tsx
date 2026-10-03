@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentTerminalClientMessage, AgentTerminalInfo } from '@notea/protocol';
 import { AgentTerminalClient, type ConnectionState } from '@notea/workspace-client';
 import { firstName, type ClaudePane } from '@/lib/claude-panes';
-import { OWN_FONT_SIZE, WATCH_FONT, largestFittingSize } from '@/lib/terminal-fit';
+import { OWN_FONT_SIZE, OWN_LINE_HEIGHT, WATCH_FONT, WATCH_LINE_HEIGHT, largestFittingSize } from '@/lib/terminal-fit';
 import { findKnownLinks } from '@/lib/terminal-links';
 import { Avatar } from './ui/avatar';
 import { cx } from './ui/cx';
@@ -89,7 +89,7 @@ export function ClaudeTerminal({ workspaceId, pane }: { workspaceId: string; pan
       const term = new Terminal({
         cursorBlink: true,
         fontSize: OWN_FONT_SIZE,
-        lineHeight: 1.2,
+        lineHeight: OWN_LINE_HEIGHT,
         fontFamily: TERMINAL_FONT_FAMILY,
         fontWeightBold: 600,
         scrollback: 5000,
@@ -171,8 +171,10 @@ export function ClaudeTerminal({ workspaceId, pane }: { workspaceId: string; pan
       };
       /**
        * A watcher's terminal has the owner's grid, so Claude's layout reads as it does for
-       * them, but not their font: it is the largest that shows the whole grid in this pane.
-       * The owner's pane fitted the grid to its size; this fits the size to the grid.
+       * them, but not their font or line spacing: the font is the largest that shows the
+       * whole grid across this pane, and the lines are spread to fill the pane's height.
+       * The owner's pane fitted the grid to its size; this fits the size to the grid, so
+       * the terminal is as tall and as wide as the pane whatever screen the owner has.
        */
       const fitFontToGrid = () => {
         if (mayType) return;
@@ -182,12 +184,30 @@ export function ClaudeTerminal({ workspaceId, pane }: { workspaceId: string; pan
         };
         // Not laid out (a pane hidden by the phone layout): wait until it is shown.
         if (!measure()) return;
-        const size = largestFittingSize(WATCH_FONT, (candidate) => {
-          term.options.fontSize = candidate;
+        const rowsFit = () => {
+          const room = measure();
+          return room !== null && room.rows >= term.rows;
+        };
+        const gridFits = () => {
           const room = measure();
           return room !== null && room.cols >= term.cols && room.rows >= term.rows;
+        };
+        // The font first, at the tightest spacing, so that it is the pane's width (or, for
+        // a pane much wider than tall, its height) that sets the text size.
+        term.options.lineHeight = WATCH_LINE_HEIGHT.min;
+        const size = largestFittingSize(WATCH_FONT, (candidate) => {
+          term.options.fontSize = candidate;
+          return gridFits();
         });
         term.options.fontSize = size ?? WATCH_FONT.min;
+        // Then the height that font leaves over goes into the spacing between lines: the
+        // widest at which the rows still fit. The width is already settled (or, past the
+        // smallest font, scrolls), and spacing does not change it.
+        const spacing = largestFittingSize(WATCH_LINE_HEIGHT, (candidate) => {
+          term.options.lineHeight = candidate;
+          return rowsFit();
+        });
+        term.options.lineHeight = spacing ?? WATCH_LINE_HEIGHT.min;
         // A grid that fits needs no scrollbars. xterm re-syncs its own scrollbar and its
         // helper textarea on a resize or a scroll, not on a font change, so they keep the
         // previous font's geometry and would stretch the pane's scroll area for nothing.
@@ -232,7 +252,10 @@ export function ClaudeTerminal({ workspaceId, pane }: { workspaceId: string; pan
               info = message.terminal;
               knownLinks = message.links;
               term.options.disableStdin = !mayType;
-              if (mayType) term.options.fontSize = OWN_FONT_SIZE;
+              if (mayType) {
+                term.options.fontSize = OWN_FONT_SIZE;
+                term.options.lineHeight = OWN_LINE_HEIGHT;
+              }
               // RIS through the parser, so output still queued from before a reconnect
               // cannot land on top of the fresh screen; then draw the screen at the
               // size it was captured at.
