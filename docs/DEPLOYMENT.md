@@ -179,7 +179,7 @@ vercel --prod
 The web app will build and sign-in will work as soon as `DATABASE_URL` and `AUTH_SECRET`
 are set. Workspaces, terminals and tasks additionally need the orchestrator (§5).
 
-### Custom domain: `noteawork.com` (attached to the Vercel project on 2026-10-03; **the DNS record is still to be added**)
+### Custom domain: `noteawork.com` (**live since 2026-10-03**)
 
 The web app is live at `noteaworkspace-web.vercel.app` and is meant to be served from
 `noteawork.com`. It answers on any host: Auth.js has `trustHost: true`
@@ -191,8 +191,8 @@ dashboard settings and one variable to check:
 1. **Vercel**: **done 2026-10-03** (`vercel domains add noteawork.com noteaworkspace-web`,
    team `andrej3`; the domain was already on the account). `www.noteawork.com` was not
    added; if wanted, add it to the project set to redirect to the apex.
-2. **Cloudflare** (the zone's DNS, where `orchestrator` already lives): **to do.** Add
-   `A  noteawork.com  76.76.21.21` (the record Vercel asks for), **DNS only (grey cloud)**,
+2. **Cloudflare** (the zone's DNS, where `orchestrator` already lives): **done 2026-10-03.**
+   Added `A  noteawork.com  76.76.21.21` (the record Vercel asks for), **DNS only (grey cloud)**,
    as `orchestrator` is: Vercel issues the certificate itself and recommends not proxying the
    record. (Vercel's other option is to move the zone's nameservers to Vercel, which would
    take `orchestrator` with it; do not.) Likewise for `www` if added. The zone had no records
