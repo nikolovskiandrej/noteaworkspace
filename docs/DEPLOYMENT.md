@@ -9,9 +9,10 @@ software itself is in `CURRENT_STATE.md`.
 
 **Host state, 2026-09-23.** Ubuntu 26.04.1, 4 vCPU / 7.6 GB, 4 GB swap. Docker 29.8.1,
 Node 24.21, Caddy with a Let's Encrypt certificate (valid to 2026-12-21, renewed by Caddy),
-the `notea` service account (in `docker`), `/opt/notea-workspace/app` at `351202a` (session 17) pulled
-through a read-only deploy key, `notea/workspace:dev` rebuilt from it (Claude Code 2.1.288; the
-`notea` workspace recreated on it on 2026-10-03), `.env` mode 600 against the Neon database, and
+the `notea` service account (in `docker`), `/opt/notea-workspace/app` at `95588ef` (session 19; the
+orchestrator was restarted on it on 2026-10-10) pulled through a read-only deploy key,
+`notea/workspace:dev` built at `351202a` (Claude Code 2.1.288; the `notea` workspace recreated on
+it on 2026-10-03; nothing since has changed the image), `.env` mode 600 against the Neon database, and
 `notea-orchestrator` + `notea-worker` enabled. Checked from outside: `/healthz` answers over
 TLS, the REST API returns 401 without the key, HTTP redirects to HTTPS, and probes for
 `/.env` or `/.git/config` get 404. The host was rebooted onto kernel `7.0.0-31` the same day,
@@ -407,7 +408,7 @@ remains a working fallback — the orchestrator then reaches containers through 
     on Hetzner's server backups or copy `/var/backups/notea` somewhere else.
 - **Access:** `ssh root@178.105.211.58` with the owner's key (SSH is key-only). The development machine's `known_hosts` records the host under its IP, so `ssh root@orchestrator.noteawork.com` fails there with "Host key verification failed".
 - **Image upgrade:** `git pull && npm ci && npm run build:image`, then **Stop, and then Start**, each workspace from the UI. Warn the members first: stopping ends their Claude terminals. The orchestrator recreates a container on the new image, keeping the volume, only when it starts a *stopped* container whose image id differs from the tag's. Until then the workspace keeps the old image, and its terminals the old CLIs, and the UI does not show it (session 14 found `notea` a day behind this way). Check each one as root: `docker inspect -f '{{.Image}}' notea-ws-<id>` must print the same id as `docker image inspect -f '{{.Id}}' notea/workspace:dev`.
-- **Code upgrade without an image change** (as `notea` in `/opt/notea-workspace/app`): `git pull && npm ci`, then `systemctl restart notea-orchestrator notea-worker` as root. Restarting the orchestrator ends every member's Claude terminal, because Docker cannot re-attach an exec's stream (D-045); each member's open page starts a fresh one within seconds, and `/resume` inside it picks up a conversation. Warn the members first.
+- **Code upgrade without an image change** (as `notea` in `/opt/notea-workspace/app`): `git pull && npm ci`, then `systemctl restart notea-orchestrator notea-worker` as root. Restarting the orchestrator ends every member's Claude terminal, because Docker cannot re-attach an exec's stream (D-045); each member's open page starts a fresh one within seconds, and `/resume` inside it picks up a conversation. It also ends the CLI's background-session processes (`bg-pty-host`, `bg-spare`), which carry the terminal's marker: on 2026-10-10 Andrej's uid had some before the restart and none after. Warn the members first.
 - **Logs:** `journalctl -u notea-orchestrator -u notea-worker -f`. They carry ids only, never tokens.
 - **Rotation:** changing `AGENT_TOKEN_SECRET` requires recreating containers; changing `CREDENTIALS_KEY` makes stored credentials undecryptable (members reconnect them).
 

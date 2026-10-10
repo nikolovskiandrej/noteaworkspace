@@ -90,7 +90,9 @@ agent range, fixes the gid, takes argv rather than a shell string, rejects
 process under `setsid` so cancellation reaches its children. See D-039.
 
 ### 4b. Members' Claude terminals (session 12, D-045)
-Each member who can write has one terminal per workspace: `claude`, interactive, in
+Each member who can write has one terminal per workspace: `claude --model claude-opus-5-5`
+(D-048: every member starts on that model, whatever default their plan or an earlier `/model`
+saved; `/model` still switches inside a session), interactive, in
 `/home/dev/project`, as their `users.agent_uid`, with their private HOME, where the CLI
 keeps the login they make in it (`/login`, their own account). Only the Docker daemon
 can start a process as another uid, so the pty belongs to a `docker exec` (`Tty`, stdin
