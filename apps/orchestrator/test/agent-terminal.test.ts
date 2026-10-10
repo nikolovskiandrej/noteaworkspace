@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EXEC_WRAPPER, agentHomePath } from '../src/docker/agent-exec';
 import {
   AGENT_TERMINAL_MARKER,
+  AGENT_TERMINAL_MODEL,
   PROJECT_DIR,
   SHARE_PROJECT_SCRIPT,
   STOP_TERMINAL_SCRIPT,
@@ -18,8 +19,18 @@ describe('buildAgentTerminalExecOptions', () => {
     expect(options.User).toBe('20003:1000');
     expect(options.WorkingDir).toBe(PROJECT_DIR);
     // No setsid: the pty must stay the process's controlling terminal, or resizes never reach it.
-    expect(options.Cmd).toEqual(['/bin/sh', '-c', EXEC_WRAPPER, 'notea-agent-terminal', 'claude']);
+    expect(options.Cmd).toEqual(['/bin/sh', '-c', EXEC_WRAPPER, 'notea-agent-terminal', 'claude', '--model', 'claude-opus-5-5']);
     expect(options).toMatchObject({ Tty: true, AttachStdin: true, AttachStdout: true, ConsoleSize: [40, 120] });
+  });
+
+  it('starts every member’s Claude on one model, by flag, for each member alike', () => {
+    expect(AGENT_TERMINAL_MODEL).toBe('claude-opus-5-5');
+    for (const uid of [20_003, 20_004]) {
+      const options = buildAgentTerminalExecOptions({ ...andrej, uid }, limits, { cols: 80, rows: 24 });
+      expect(options.Cmd?.slice(-3)).toEqual(['claude', '--model', AGENT_TERMINAL_MODEL]);
+      // One place decides it: the variable would also reach every process the Claude starts.
+      expect((options.Env ?? []).some((entry) => entry.startsWith('ANTHROPIC_'))).toBe(false);
+    }
   });
 
   it('gives it the member’s private HOME, the marker, git’s exception and their commit identity', () => {

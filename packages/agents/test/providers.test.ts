@@ -34,6 +34,14 @@ function pinnedClaudeCode(): string {
   return match[1]!;
 }
 
+/** The model the orchestrator starts every member's Claude terminal on (`--model`). */
+function terminalModel(): string {
+  const source = readFileSync(new URL('../../../apps/orchestrator/src/docker/agent-terminal.ts', import.meta.url), 'utf8');
+  const match = /AGENT_TERMINAL_MODEL\s*=\s*'([^']+)'/.exec(source);
+  if (!match) throw new Error('the members’ Claude terminals no longer name a model');
+  return match[1]!;
+}
+
 describe('the Anthropic model catalog', () => {
   it('offers Sonnet 5.5 for background tasks', () => {
     expect(findModel({ provider: 'anthropic', modelId: 'claude-sonnet-5-5' })).toMatchObject({
@@ -57,5 +65,12 @@ describe('the Anthropic model catalog', () => {
     for (const id of Object.keys(FIRST_CLAUDE_CODE_WITH)) {
       expect(findModel({ provider: 'anthropic', modelId: id }), id).not.toBeNull();
     }
+  });
+
+  it('includes the model the members’ terminals start on, which the pinned Claude Code knows', () => {
+    const id = terminalModel();
+    expect(findModel({ provider: 'anthropic', modelId: id }), `${id} is not in the catalog`).not.toBeNull();
+    const floor = FIRST_CLAUDE_CODE_WITH[id];
+    if (floor) expect(atLeast(pinnedClaudeCode(), floor), `${id} needs claude-code ${floor}; the image pins ${pinnedClaudeCode()}`).toBe(true);
   });
 });

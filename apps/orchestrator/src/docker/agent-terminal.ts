@@ -7,8 +7,16 @@ import { HOME_MOUNT_PATH } from './spec';
 /** The project every member's Claude works in: the workspace's main tree. */
 export const PROJECT_DIR = `${HOME_MOUNT_PATH}/project`;
 
+/**
+ * The model every member's terminal starts on. Given to the CLI as `--model`, which
+ * wins over the default a member saved earlier with `/model`: inside a session
+ * `/model` still switches, but the pick lasts only until that terminal ends. The
+ * image's Claude Code must know the id (Opus 5.5 needs 2.1.280 or later).
+ */
+export const AGENT_TERMINAL_MODEL = 'claude-opus-5-5';
+
 /** What a member's terminal runs: the Claude Code CLI, interactively. */
-export const AGENT_TERMINAL_COMMAND: readonly string[] = ['claude'];
+export const AGENT_TERMINAL_COMMAND: readonly string[] = ['claude', '--model', AGENT_TERMINAL_MODEL];
 
 /**
  * In the environment of a terminal and, by inheritance, of everything it starts.
